@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>BlueHoover Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .chart-container {
+            width: 80%;
+            margin: 20px auto;
+            padding: 20px;
+            background: #f5f5f5;
+            border-radius: 8px;
+        }
+        
+        .input-container {
+            width: 80%;
+            margin: 20px auto;
+            text-align: center;
+            padding: 20px;
+            background: #f5f5f5;
+            border-radius: 8px;
+        }
+        
+        .input-container input {
+            width: 300px;
+            padding: 8px;
+            margin-right: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        
+        .input-container button {
+            padding: 8px 16px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        
+        .input-container button:hover {
+            background-color: #45a049;
+        }
+        
+        h1 {
+            text-align: center;
+            color: #333;
+            font-family: Arial, sans-serif;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>BlueHoover Analytics Dashboard</h1>
+    
+    <div class="input-container">
+        <input type="text" id="customWords" placeholder="Enter words to track (comma separated)" value="dogs, cats, raccoons, squirrels, badgers">
+        <button onclick="updateCustomWordChart()">Track Words</button>
+    </div>
+    <div class="chart-container">
+        <canvas id="customWordChart"></canvas>
+    </div>
+
+    <div class="chart-container">
+        <canvas id="postsTimeline"></canvas>
+    </div>
+
+
+
+    <script>
+        let customWordChart = null;  // Global variable to store chart instance
+        
+        async function updateCharts() {
+            // Posts Timeline Chart
+            const timelineResponse = await fetch('/api/posts_timeline');
+            const timelineData = await timelineResponse.json();
+            
+            new Chart(document.getElementById('postsTimeline'), {
+                type: 'line',
+                data: {
+                    labels: timelineData.labels,
+                    datasets: [{
+                        label: 'Posts per Hour (24h)',
+                        data: timelineData.data,
+                        fill: false,
+                        borderColor: 'rgb(75, 192, 192)',
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+
+        updateCharts();
+        // Update charts every 5 minutes
+        setInterval(updateCharts, 5 * 60 * 1000);
+
+        async function updateCustomWordChart() {
+            const wordsInput = document.getElementById('customWords').value;
+            const words = wordsInput.split(',')
+                .map(word => word.trim())
+                .filter(word => word.length > 0);
+            
+            if (words.length === 0) {
+                alert('Please enter at least one word to track');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/custom_word_timeline', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ words: words })
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                
+                const data = await response.json();
+                
+                // Destroy existing chart if it exists
+                if (customWordChart) {
+                    customWordChart.destroy();
+                }
+                
+                // Create new chart
+                customWordChart = new Chart(document.getElementById('customWordChart'), {
+                    type: 'line',
+                    data: {
+                        labels: data.labels,
+                        datasets: data.datasets.map(dataset => ({
+                            label: dataset.label,
+                            data: dataset.data,
+                            borderColor: dataset.color,
+                            backgroundColor: 'transparent',
+                            borderWidth: 2,
+                            tension: 0.1,
+                            fill: false
+                        }))
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            x: {
+                                title: {
+                                    display: true,
+                                    text: 'Time (hours)'
+                                }
+                            },
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Frequency'
+                                }
+                            }
+                        },
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: 'Custom Word Usage Over Time (24h)'
+                            },
+                            legend: {
+                                position: 'bottom',
+                                display: true,
+                                labels: {
+                                    boxWidth: 12,
+                                    padding: 10
+                                }
+                            }
+                        }
+                    }
+                });
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Error updating chart');
+            }
+        }
+
+        // Add this after updateCharts() call
+        // This will trigger the custom word chart when the page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            updateCustomWordChart();
+        });
+    </script>
+</body>
+</html> 

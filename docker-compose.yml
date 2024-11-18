@@ -1,0 +1,55 @@
+version: '3'
+
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - ./clickhouse-data:/var/lib/clickhouse
+    environment:
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=
+      - CLICKHOUSE_DB=default
+
+  firehose:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_PORT=8123
+      - CLICKHOUSE_DATABASE=default
+    depends_on:
+      - clickhouse
+
+  webapp:
+    build:
+      context: .
+      dockerfile: webapp.Dockerfile
+    expose:
+      - "8000"
+    environment:
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_PORT=8123
+      - CLICKHOUSE_DATABASE=default
+    depends_on:
+      - clickhouse
+    restart: always
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./bluehoover/dashboard/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./bluehoover/dashboard/static:/app/static:ro
+    depends_on:
+      - webapp
+    restart: always
+
+volumes:
+  clickhouse_data:
+  clickhouse_logs:
+  bluehoover_logs: 

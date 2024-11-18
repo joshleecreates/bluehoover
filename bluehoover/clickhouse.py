@@ -3,9 +3,13 @@ from datetime import datetime
 import signal
 from collections import defaultdict
 from types import FrameType
-from typing import List
+from typing import List, Optional
 import clickhouse_connect
 from clickhouse_connect.driver.client import Client
+from clickhouse_connect.driver.exceptions import ClickHouseError
+import backoff
+import os
+from loguru import logger
 
 from atproto import (
     CAR,
@@ -23,13 +27,17 @@ _INTERESTED_RECORDS = {
 }
 
 BATCH_SIZE = 256
-CLICKHOUSE_HOST = 'localhost'
-CLICKHOUSE_PORT = 8123
-CLICKHOUSE_DATABASE = 'default'
+CLICKHOUSE_HOST = os.getenv('CLICKHOUSE_HOST', 'localhost')
+CLICKHOUSE_PORT = int(os.getenv('CLICKHOUSE_PORT', '8123'))
+CLICKHOUSE_DATABASE = os.getenv('CLICKHOUSE_DATABASE', 'default')
 CLICKHOUSE_TABLE = 'posts'
 
 post_queue: asyncio.Queue = asyncio.Queue()
 
+# Add retry configuration
+MAX_RETRIES = 3
+INITIAL_WAIT_SECONDS = 1
+MAX_WAIT_SECONDS = 10
 
 def _get_ops_by_type(commit: models.ComAtprotoSyncSubscribeRepos.Commit) -> defaultdict:
     operation_by_type = defaultdict(lambda: {'created': [], 'deleted': []})
@@ -59,87 +67,138 @@ def _get_ops_by_type(commit: models.ComAtprotoSyncSubscribeRepos.Commit) -> defa
     return operation_by_type
 
 
+@backoff.on_exception(
+    backoff.expo,
+    (ClickHouseError, ConnectionError),
+    max_tries=MAX_RETRIES,
+    max_time=30
+)
 async def process_batch(client: Client, batch: List[dict]) -> None:
+    if not batch:
+        return
+        
     try:
         # Prepare data for insertion
-        cids = [post['cid'] for post in batch]
-        uris = [post['uri'] for post in batch]
-        created_ats = [datetime.fromisoformat(post['created_at'].replace('Z', '+00:00')) for post in batch]
-        authors = [post['author'] for post in batch]
-        texts = [post['text'] for post in batch]
-        reply_parent_uris = [post['reply_parent_uri'] or '' for post in batch]
+        data = []
+        for post in batch:
+            try:
+                created_at = datetime.fromisoformat(post['created_at'].replace('Z', '+00:00'))
+                data.append([
+                    post['cid'],
+                    post['uri'],
+                    created_at,
+                    post['author'],
+                    post.get('text') or '',
+                    post.get('reply_parent_uri') or ''
+                ])
+            except (KeyError, ValueError) as e:
+                logger.warning(f"Skipping malformed post: {str(e)}, {post}")
+                continue
 
-        data = [
-            cids,
-            uris,
-            created_ats,
-            authors,
-            texts,
-            reply_parent_uris,
-        ]
+        if not data:
+            return
 
         # Insert data into ClickHouse
-        client.insert(CLICKHOUSE_TABLE, data, column_names=['cid', 'uri', 'created_at', 'author', 'text', 'reply_parent_uri'], column_oriented=True)
-        print(f"Inserted batch of {len(batch)} posts")
+        client.insert(
+            CLICKHOUSE_TABLE, 
+            data,
+            column_names=['cid', 'uri', 'created_at', 'author', 'text', 'reply_parent_uri'],
+        )
+        logger.info(f"Inserted batch of {len(data)} posts")
     except Exception as e:
-        print(f"Error inserting batch: {str(e)}")
+        logger.error(f"Error inserting batch: {str(e)}")
+        raise
+
+class ClickHouseManager:
+    def __init__(self):
+        self.client: Optional[Client] = None
+        self.reconnect_lock = asyncio.Lock()
+    
+    async def get_client(self) -> Client:
+        if self.client is None:
+            async with self.reconnect_lock:
+                if self.client is None:  # Double-check pattern
+                    await self.connect()
+        return self.client
+    
+    @backoff.on_exception(
+        backoff.expo,
+        (ClickHouseError, ConnectionError),
+        max_tries=MAX_RETRIES,
+        max_time=30
+    )
+    async def connect(self) -> None:
+        try:
+            self.client = clickhouse_connect.get_client(
+                host=CLICKHOUSE_HOST,
+                port=CLICKHOUSE_PORT,
+                database=CLICKHOUSE_DATABASE,
+                username=os.getenv('CLICKHOUSE_USER', 'default'),
+                password=os.getenv('CLICKHOUSE_PASSWORD', '')
+            )
+            
+            # Create table if it doesn't exist
+            create_table_query = """
+            CREATE TABLE IF NOT EXISTS posts (
+                cid String,
+                uri String,
+                created_at DateTime64(3),
+                author String,
+                text String,
+                reply_parent_uri String,
+                insertion_time DateTime64(3) DEFAULT now64()
+            ) ENGINE = MergeTree()
+            ORDER BY (created_at, cid)
+            """
+            self.client.command(create_table_query)
+            logger.info("Connected to ClickHouse and verified table exists")
+        except Exception as e:
+            logger.error(f"Error connecting to ClickHouse: {str(e)}")
+            self.client = None
+            raise
 
 async def batch_processor() -> None:
-    # Create ClickHouse client
-    client = clickhouse_connect.get_client(
-        host=CLICKHOUSE_HOST,
-        port=CLICKHOUSE_PORT,
-        database=CLICKHOUSE_DATABASE
-    )
-
-    # Create table if it doesn't exist
-    create_table_query = """
-    CREATE TABLE IF NOT EXISTS posts (
-        cid String,
-        uri String,
-        created_at DateTime64(3),
-        author String,
-        text String,
-        reply_parent_uri String,
-        insertion_time DateTime64(3) DEFAULT now64()
-    ) ENGINE = MergeTree()
-    ORDER BY (created_at, cid)
-    """
-    client.command(create_table_query)
-
-    print("Batch processor started")
-    
+    clickhouse = ClickHouseManager()
     batch = []
+    
     while True:
         try:
-            # Get post from queue
-            post = await post_queue.get()
-            batch.append(post)
-            
+            # Get post from queue with timeout
+            try:
+                post = await asyncio.wait_for(post_queue.get(), timeout=5.0)
+                batch.append(post)
+                post_queue.task_done()
+            except asyncio.TimeoutError:
+                if batch:  # Process partial batch on timeout
+                    client = await clickhouse.get_client()
+                    await process_batch(client, batch)
+                    batch = []
+                continue
+                
             # Process batch if it reaches BATCH_SIZE
             if len(batch) >= BATCH_SIZE:
+                client = await clickhouse.get_client()
                 await process_batch(client, batch)
                 batch = []
                 
         except Exception as e:
-            print(f"Error in batch processor: {e}")
-        finally:
-            post_queue.task_done()
+            logger.error(f"Error in batch processor: {e}")
+            # Don't clear the batch - it will retry on next iteration
 
 async def queue_for_insertion(post: dict) -> None:
     await post_queue.put(post)
 
 async def signal_handler(_: int, __: FrameType) -> None:
-    print('Keyboard interrupt received. Stopping...')
+    logger.warning('Keyboard interrupt received. Stopping...')
     
     # Wait for queue to be empty with a 10-second timeout
     if not post_queue.empty():
-        print('Waiting for remaining posts to be processed (5s timeout)...')
+        logger.info('Waiting for remaining posts to be processed (5s timeout)...')
         try:
             await asyncio.wait_for(post_queue.join(), timeout=5.0)
-            print('Successfully processed remaining posts')
+            logger.success('Successfully processed remaining posts')
         except asyncio.TimeoutError:
-            print('Timeout reached while processing remaining posts')
+            logger.warning('Timeout reached while processing remaining posts')
     
     # Stop receiving new messages
     await client.stop()
