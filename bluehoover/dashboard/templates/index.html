@@ -46,17 +46,69 @@
             text-align: center;
             color: #333;
             font-family: Arial, sans-serif;
-            margin: 20px 0;
+            margin: 15px 0;
+        }
+        
+        .time-controls {
+            width: 80%;
+            margin: 20px auto;
+            text-align: center;
+            padding: 10px;
+            background: #f5f5f5;
+            border-radius: 8px;
+        }
+        
+        .time-button {
+            padding: 8px 16px;
+            margin: 0 5px;
+            border: 1px solid #4CAF50;
+            background-color: white;
+            color: #4CAF50;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .time-button:hover {
+            background-color: #4CAF50;
+            color: white;
+        }
+        
+        .time-button.active {
+            background-color: #4CAF50;
+            color: white;
+        }
+        
+        .intro-container {
+            width: 80%;
+            margin: 10px auto;
+            padding: 12px;
+            background: #f5f5f5;
+            border-radius: 8px;
+            text-align: center;
+            color: #666;
+            font-family: Arial, sans-serif;
+            line-height: 1.4;
+        }
+        
+        .intro-container p {
+            margin: 0;
+            font-size: 14px;
         }
     </style>
 </head>
 <body>
-    <h1>BlueHoover Analytics Dashboard</h1>
+    <h1>BlueHoover - BlueSky Firehose Analysis</h1>
+    
+    <div class="intro-container">
+        <p>This is a limited interface on top of a ClickHouse database connected to the BlueSky firehose. You can enter comma-separated terms to track, and the chart will update to show the frequency of those terms over the last 24hrs.</p>
+    </div>
     
     <div class="input-container">
-        <input type="text" id="customWords" placeholder="Enter words to track (comma separated)" value="dogs, cats, raccoons, squirrels, badgers">
+        <input type="text" id="customWords" placeholder="Enter words to track (comma separated)" value="dogs, cats, raccoons, squirrels, badgers" onkeypress="handleKeyPress(event)">
         <button onclick="updateCustomWordChart()">Track Words</button>
     </div>
+
     <div class="chart-container">
         <canvas id="customWordChart"></canvas>
     </div>
@@ -65,43 +117,10 @@
         <canvas id="postsTimeline"></canvas>
     </div>
 
-
-
     <script>
-        let customWordChart = null;  // Global variable to store chart instance
+        let customWordChart = null;
+        let postsTimelineChart = null;
         
-        async function updateCharts() {
-            // Posts Timeline Chart
-            const timelineResponse = await fetch('/api/posts_timeline');
-            const timelineData = await timelineResponse.json();
-            
-            new Chart(document.getElementById('postsTimeline'), {
-                type: 'line',
-                data: {
-                    labels: timelineData.labels,
-                    datasets: [{
-                        label: 'Posts per Hour (24h)',
-                        data: timelineData.data,
-                        fill: false,
-                        borderColor: 'rgb(75, 192, 192)',
-                        tension: 0.1
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    scales: {
-                        y: {
-                            beginAtZero: true
-                        }
-                    }
-                }
-            });
-        }
-
-        updateCharts();
-        // Update charts every 5 minutes
-        setInterval(updateCharts, 5 * 60 * 1000);
-
         async function updateCustomWordChart() {
             const wordsInput = document.getElementById('customWords').value;
             const words = wordsInput.split(',')
@@ -122,18 +141,12 @@
                     body: JSON.stringify({ words: words })
                 });
                 
-                if (!response.ok) {
-                    throw new Error('Network response was not ok');
-                }
-                
                 const data = await response.json();
                 
-                // Destroy existing chart if it exists
                 if (customWordChart) {
                     customWordChart.destroy();
                 }
                 
-                // Create new chart
                 customWordChart = new Chart(document.getElementById('customWordChart'), {
                     type: 'line',
                     data: {
@@ -154,7 +167,13 @@
                             x: {
                                 title: {
                                     display: true,
-                                    text: 'Time (hours)'
+                                    text: 'Time'
+                                },
+                                ticks: {
+                                    maxTicksLimit: 12,
+                                    autoSkip: true,
+                                    maxRotation: 45,
+                                    minRotation: 45
                                 }
                             },
                             y: {
@@ -168,16 +187,15 @@
                         plugins: {
                             title: {
                                 display: true,
-                                text: 'Custom Word Usage Over Time (24h)'
+                                text: 'Word Usage (Last 24 Hours)'
                             },
                             legend: {
-                                position: 'bottom',
-                                display: true,
-                                labels: {
-                                    boxWidth: 12,
-                                    padding: 10
-                                }
+                                position: 'bottom'
                             }
+                        },
+                        interaction: {
+                            mode: 'index',
+                            intersect: false
                         }
                     }
                 });
@@ -187,10 +205,80 @@
             }
         }
 
-        // Add this after updateCharts() call
-        // This will trigger the custom word chart when the page loads
+        async function updateCharts() {
+            try {
+                const response = await fetch('/api/posts_timeline');
+                const data = await response.json();
+                
+                if (postsTimelineChart) {
+                    postsTimelineChart.destroy();
+                }
+                
+                postsTimelineChart = new Chart(document.getElementById('postsTimeline'), {
+                    type: 'line',
+                    data: {
+                        labels: data.labels,
+                        datasets: [{
+                            label: 'Posts per 10 minutes',
+                            data: data.data,
+                            borderColor: 'rgba(75, 192, 192, 1)',
+                            backgroundColor: 'transparent',
+                            borderWidth: 2,
+                            tension: 0.1,
+                            fill: false
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            x: {
+                                title: {
+                                    display: true,
+                                    text: 'Time'
+                                },
+                                ticks: {
+                                    maxTicksLimit: 12,
+                                    autoSkip: true,
+                                    maxRotation: 45,
+                                    minRotation: 45
+                                }
+                            },
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Number of Posts'
+                                }
+                            }
+                        },
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: 'Posts Timeline (Last 24 Hours)'
+                            },
+                            legend: {
+                                position: 'bottom'
+                            }
+                        }
+                    }
+                });
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Error updating posts timeline');
+            }
+        }
+
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                event.preventDefault();  // Prevent form submission if within a form
+                updateCustomWordChart();
+            }
+        }
+
+        // Initial load
         document.addEventListener('DOMContentLoaded', function() {
             updateCustomWordChart();
+            updateCharts();
         });
     </script>
 </body>

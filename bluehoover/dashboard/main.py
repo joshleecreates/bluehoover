@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Query
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -11,6 +11,7 @@ import re
 from typing import List, Dict
 from datetime import datetime, timedelta
 from pydantic import BaseModel
+from enum import Enum
 
 app = FastAPI()
 
@@ -41,66 +42,89 @@ def process_text(text: str) -> List[str]:
 async def root(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
+class TimeRange(str, Enum):
+    HOUR_1 = "1h"
+    HOURS_6 = "6h"
+    HOURS_24 = "24h"
+    DAYS_7 = "7d"
+
+def get_time_range(range_str: TimeRange) -> tuple[datetime, datetime, str]:
+    end_time = datetime.now().replace(second=0, microsecond=0)  # Round to nearest minute
+    
+    if range_str == TimeRange.HOUR_1:
+        start_time = end_time - timedelta(hours=1)
+        interval = "1 MINUTE"
+    elif range_str == TimeRange.HOURS_6:
+        start_time = end_time - timedelta(hours=6)
+        interval = "5 MINUTE"
+    elif range_str == TimeRange.HOURS_24:
+        start_time = end_time - timedelta(days=1)
+        interval = "10 MINUTE"
+    else:  # 7d
+        start_time = end_time - timedelta(days=7)
+        interval = "1 HOUR"
+    
+    return start_time, end_time, interval
 
 @app.get("/api/posts_timeline")
 async def get_posts_timeline():
     client = get_clickhouse_client()
     
+    end_time = datetime.now()
+    start_time = end_time - timedelta(days=1)
+    
     query = """
-    SELECT
-        toStartOfHour(created_at) as hour,
-        count() as post_count
-    FROM posts
-    WHERE created_at >= now() - INTERVAL 24 HOUR
-    GROUP BY hour
-    ORDER BY hour
+        SELECT 
+            toStartOfInterval(created_at, INTERVAL 10 MINUTE) as interval_start,
+            count(*) as post_count
+        FROM posts
+        WHERE created_at >= %(start_time)s 
+          AND created_at < %(end_time)s
+        GROUP BY interval_start
+        ORDER BY interval_start
     """
     
-    result = client.query(query)
+    result = client.query(query, parameters={
+        'start_time': start_time,
+        'end_time': end_time
+    })
     
     return {
-        "labels": [row[0].strftime("%Y-%m-%d %H:%M") for row in result.result_rows],
+        "labels": [row[0].strftime('%H:%M') for row in result.result_rows],
         "data": [row[1] for row in result.result_rows]
     }
 
 class WordList(BaseModel):
     words: List[str]
+    timeRange: TimeRange = TimeRange.HOURS_24
 
 @app.post("/api/custom_word_timeline")
 async def get_custom_word_timeline(word_list: WordList):
     # Sanitize input words
     sanitized_words = [
-        re.sub(r'[^a-zA-Z0-9\s]', '', word.lower())[:50]  # Remove special chars and limit length
+        re.sub(r'[^a-zA-Z0-9\s]', '', word.lower())[:50]
         for word in word_list.words
         if len(word.strip()) > 0
-    ][:10]  # Limit to 10 words maximum
+    ][:10]
     
     if not sanitized_words:
         return {"error": "No valid words provided"}
     
     client = get_clickhouse_client()
-    
-    # Define time ranges for the last 24 hours
     end_time = datetime.now()
     start_time = end_time - timedelta(days=1)
-    
-    # Generate SQL count statements for each word
-    word_counts = [
-        f"sum(if(positionCaseInsensitive(text, %(word_{i})s) > 0, 1, 0)) as word_{i}"
-        for i in range(len(sanitized_words))
-    ]
     
     query = f"""
         SELECT 
             toStartOfInterval(created_at, INTERVAL 10 MINUTE) as interval_start,
-            {', '.join(word_counts)}
+            {', '.join([f'countIf(positionCaseInsensitive(text, %(word_{i})s) > 0)' for i in range(len(sanitized_words))])}
         FROM posts
-        WHERE created_at BETWEEN %(start_time)s AND %(end_time)s
+        WHERE created_at >= %(start_time)s 
+          AND created_at < %(end_time)s
         GROUP BY interval_start
         ORDER BY interval_start
     """
     
-    # Prepare parameters
     parameters = {
         'start_time': start_time,
         'end_time': end_time,
@@ -109,14 +133,12 @@ async def get_custom_word_timeline(word_list: WordList):
     
     result = client.query(query, parameters=parameters)
     
-    # Generate colors for each word
     colors = [
-        f'rgba({(hash(word) % 128 + 128)}, {(hash(word + "1") % 128 + 64)}, {(hash(word + "2") % 128 + 64)}, 0.5)'
+        f'rgba({(hash(word) % 128 + 128)}, {(hash(word + "1") % 128 + 64)}, {(hash(word + "2") % 128 + 64)}, 0.8)'
         for word in sanitized_words
     ]
     
-    # Process the results
-    hours = [row[0].strftime('%H:%M') for row in result.result_rows]
+    times = [row[0].strftime('%H:%M') for row in result.result_rows]
     datasets = [
         {
             'label': word,
@@ -127,6 +149,6 @@ async def get_custom_word_timeline(word_list: WordList):
     ]
     
     return {
-        "labels": hours,
+        "labels": times,
         "datasets": datasets
     } 
