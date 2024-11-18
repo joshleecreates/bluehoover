@@ -1,0 +1,19 @@
+[tool.poetry]
+name = "bluehoover"
+version = "0.1.0"
+description = ""
+authors = ["Joseph Redfern <joseph@redfern.me>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+atproto = "^0.0.55"
+clickhouse-connect = "^0.8.6"
+
+
+[tool.poetry.group.dev.dependencies]
+ipython = "^8.29.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
