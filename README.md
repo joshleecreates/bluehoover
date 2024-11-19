@@ -8,9 +8,9 @@ It may be broken in strange an unexpected ways.
 Stack is Asyncio + FastAPI + Clickhouse + Chart.js. It's split into 4 containers:
 
 - `firehose` - ingests the firehose and writes to Clickhouse in batches
-- `dashboard` - a simple dashboard for viewing analytics
-- `webapp` - a simple webapp for viewing the dashboard
-- `clickhouse` - the Clickhouse server
+- `webapp` - a simple webapp for viewing the dashboard, runs under uvicorn
+- `nginx` - reverse proxy; perhaps not strictlyneeded
+- `clickhouse` - the Clickhouse server, the powerhouse of the stack
 
 # Running
 
