@@ -27,10 +27,10 @@ _INTERESTED_RECORDS = {
 }
 
 BATCH_SIZE = 1024
-CLICKHOUSE_HOST = os.getenv('CLICKHOUSE_HOST', 'localhost')
-CLICKHOUSE_PORT = int(os.getenv('CLICKHOUSE_PORT', '8123'))
-CLICKHOUSE_DATABASE = os.getenv('CLICKHOUSE_DATABASE', 'default')
-CLICKHOUSE_TABLE = 'posts'
+CLICKHOUSE_HOST = os.getenv("CLICKHOUSE_HOST", "localhost")
+CLICKHOUSE_PORT = int(os.getenv("CLICKHOUSE_PORT", "8123"))
+CLICKHOUSE_DATABASE = os.getenv("CLICKHOUSE_DATABASE", "default")
+CLICKHOUSE_TABLE = "posts"
 
 post_queue: asyncio.Queue = asyncio.Queue()
 
@@ -39,18 +39,24 @@ MAX_RETRIES = 3
 INITIAL_WAIT_SECONDS = 1
 MAX_WAIT_SECONDS = 10
 
+
 def _get_ops_by_type(commit: models.ComAtprotoSyncSubscribeRepos.Commit) -> defaultdict:
-    operation_by_type = defaultdict(lambda: {'created': [], 'deleted': []})
+    operation_by_type = defaultdict(lambda: {"created": [], "deleted": []})
 
     car = CAR.from_bytes(commit.blocks)
     for op in commit.ops:
-        uri = AtUri.from_str(f'at://{commit.repo}/{op.path}')
+        uri = AtUri.from_str(f"at://{commit.repo}/{op.path}")
 
-        if op.action == 'create':
+        if op.action == "create":
             if not op.cid:
                 continue
 
-            create_info = {'uri': str(uri), 'cid': str(op.cid), 'author': commit.repo, 'path': op.path}
+            create_info = {
+                "uri": str(uri),
+                "cid": str(op.cid),
+                "author": commit.repo,
+                "path": op.path,
+            }
 
             record_raw_data = car.blocks.get(op.cid)
             if not record_raw_data:
@@ -59,38 +65,41 @@ def _get_ops_by_type(commit: models.ComAtprotoSyncSubscribeRepos.Commit) -> defa
             record = models.get_or_create(record_raw_data, strict=False)
             record_type = _INTERESTED_RECORDS.get(uri.collection)
             if record_type and models.is_record_type(record, record_type):
-                operation_by_type[uri.collection]['created'].append({'record': record, **create_info})
+                operation_by_type[uri.collection]["created"].append(
+                    {"record": record, **create_info}
+                )
 
-        if op.action == 'delete':
-            operation_by_type[uri.collection]['deleted'].append({'uri': str(uri)})
+        if op.action == "delete":
+            operation_by_type[uri.collection]["deleted"].append({"uri": str(uri)})
 
     return operation_by_type
 
 
 @backoff.on_exception(
-    backoff.expo,
-    (ClickHouseError, ConnectionError),
-    max_tries=MAX_RETRIES,
-    max_time=30
+    backoff.expo, (ClickHouseError, ConnectionError), max_tries=MAX_RETRIES, max_time=30
 )
 async def process_batch(client: Client, batch: List[dict]) -> None:
     if not batch:
         return
-        
+
     try:
         # Prepare data for insertion
         data = []
         for post in batch:
             try:
-                created_at = datetime.fromisoformat(post['created_at'].replace('Z', '+00:00'))
-                data.append([
-                    post['cid'],
-                    post['uri'],
-                    created_at,
-                    post['author'],
-                    post.get('text') or '',
-                    post.get('reply_parent_uri') or ''
-                ])
+                created_at = datetime.fromisoformat(
+                    post["created_at"].replace("Z", "+00:00")
+                )
+                data.append(
+                    [
+                        post["cid"],
+                        post["uri"],
+                        created_at,
+                        post["author"],
+                        post.get("text") or "",
+                        post.get("reply_parent_uri") or "",
+                    ]
+                )
             except (KeyError, ValueError) as e:
                 logger.warning(f"Skipping malformed post: {str(e)}, {post}")
                 continue
@@ -100,32 +109,40 @@ async def process_batch(client: Client, batch: List[dict]) -> None:
 
         # Insert data into ClickHouse
         client.insert(
-            CLICKHOUSE_TABLE, 
+            CLICKHOUSE_TABLE,
             data,
-            column_names=['cid', 'uri', 'created_at', 'author', 'text', 'reply_parent_uri'],
+            column_names=[
+                "cid",
+                "uri",
+                "created_at",
+                "author",
+                "text",
+                "reply_parent_uri",
+            ],
         )
         logger.info(f"Inserted batch of {len(data)} posts")
     except Exception as e:
         logger.error(f"Error inserting batch: {str(e)}")
         raise
 
+
 class ClickHouseManager:
     def __init__(self):
         self.client: Optional[Client] = None
         self.reconnect_lock = asyncio.Lock()
-    
+
     async def get_client(self) -> Client:
         if self.client is None:
             async with self.reconnect_lock:
                 if self.client is None:  # Double-check pattern
                     await self.connect()
         return self.client
-    
+
     @backoff.on_exception(
         backoff.expo,
         (ClickHouseError, ConnectionError),
         max_tries=MAX_RETRIES,
-        max_time=30
+        max_time=30,
     )
     async def connect(self) -> None:
         try:
@@ -133,10 +150,10 @@ class ClickHouseManager:
                 host=CLICKHOUSE_HOST,
                 port=CLICKHOUSE_PORT,
                 database=CLICKHOUSE_DATABASE,
-                username=os.getenv('CLICKHOUSE_USER', 'default'),
-                password=os.getenv('CLICKHOUSE_PASSWORD', '')
+                username=os.getenv("CLICKHOUSE_USER", "default"),
+                password=os.getenv("CLICKHOUSE_PASSWORD", ""),
             )
-            
+
             # Create table if it doesn't exist
             create_table_query = """
             CREATE TABLE IF NOT EXISTS posts (
@@ -157,10 +174,11 @@ class ClickHouseManager:
             self.client = None
             raise
 
+
 async def batch_processor() -> None:
     clickhouse = ClickHouseManager()
     batch = []
-    
+
     while True:
         try:
             # Get post from queue with timeout
@@ -174,34 +192,37 @@ async def batch_processor() -> None:
                     await process_batch(client, batch)
                     batch = []
                 continue
-                
+
             # Process batch if it reaches BATCH_SIZE
             if len(batch) >= BATCH_SIZE:
                 client = await clickhouse.get_client()
                 await process_batch(client, batch)
                 batch = []
-                
+
         except Exception as e:
             logger.error(f"Error in batch processor: {e}")
             # Don't clear the batch - it will retry on next iteration
 
+
 async def queue_for_insertion(post: dict) -> None:
     await post_queue.put(post)
 
+
 async def signal_handler(_: int, __: FrameType) -> None:
-    logger.warning('Keyboard interrupt received. Stopping...')
-    
+    logger.warning("Keyboard interrupt received. Stopping...")
+
     # Wait for queue to be empty with a 10-second timeout
     if not post_queue.empty():
-        logger.info('Waiting for remaining posts to be processed (5s timeout)...')
+        logger.info("Waiting for remaining posts to be processed (5s timeout)...")
         try:
             await asyncio.wait_for(post_queue.join(), timeout=5.0)
-            logger.success('Successfully processed remaining posts')
+            logger.success("Successfully processed remaining posts")
         except asyncio.TimeoutError:
-            logger.warning('Timeout reached while processing remaining posts')
+            logger.warning("Timeout reached while processing remaining posts")
 
     # Stop receiving new messages
     await client.stop()
+
 
 async def main(firehose_client: AsyncFirehoseSubscribeReposClient) -> None:
     # Start the batch processor
@@ -218,20 +239,24 @@ async def main(firehose_client: AsyncFirehoseSubscribeReposClient) -> None:
                 with open("seq.txt", "w") as seq_f:
                     seq_f.write(f"{commit.seq}")
             asyncio.sleep(0)
-            firehose_client.update_params(models.ComAtprotoSyncSubscribeRepos.Params(cursor=commit.seq))
+            firehose_client.update_params(
+                models.ComAtprotoSyncSubscribeRepos.Params(cursor=commit.seq)
+            )
 
         if not commit.blocks:
             return
 
         ops = _get_ops_by_type(commit)
-        for created_post in ops[models.ids.AppBskyFeedPost]['created']:
+        for created_post in ops[models.ids.AppBskyFeedPost]["created"]:
             post = {
-                'cid': created_post['cid'],
-                'uri': created_post['uri'],
-                'created_at': created_post['record'].created_at,
-                'author': created_post['author'],
-                'text': created_post['record'].text,
-                'reply_parent_uri': created_post['record'].reply.parent.uri if created_post['record'].reply else None,
+                "cid": created_post["cid"],
+                "uri": created_post["uri"],
+                "created_at": created_post["record"].created_at,
+                "author": created_post["author"],
+                "text": created_post["record"].text,
+                "reply_parent_uri": created_post["record"].reply.parent.uri
+                if created_post["record"].reply
+                else None,
             }
 
             await queue_for_insertion(post)
@@ -248,8 +273,11 @@ async def main(firehose_client: AsyncFirehoseSubscribeReposClient) -> None:
         except asyncio.CancelledError:
             pass
 
-if __name__ == '__main__':
-    signal.signal(signal.SIGINT, lambda _, __: asyncio.create_task(signal_handler(_, __)))
+
+if __name__ == "__main__":
+    signal.signal(
+        signal.SIGINT, lambda _, __: asyncio.create_task(signal_handler(_, __))
+    )
 
     start_cursor = None
     try:
