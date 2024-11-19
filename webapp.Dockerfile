@@ -24,4 +24,4 @@ COPY bluehoover bluehoover/
 ENV PYTHONPATH=/app
 
 # Run the application
-CMD ["poetry", "run", "uvicorn", "bluehoover.dashboard.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"] 
+CMD ["poetry", "run", "uvicorn", "bluehoover.dashboard.webapp:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"] 

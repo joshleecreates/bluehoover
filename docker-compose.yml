@@ -7,14 +7,14 @@ services:
       - "8123:8123"
       - "9000:9000"
     volumes:
-      - ./clickhouse-data:/var/lib/clickhouse
+      - clickhouse_data:/var/lib/clickhouse
     environment:
       - CLICKHOUSE_USER=default
       - CLICKHOUSE_PASSWORD=
       - CLICKHOUSE_DB=default
 
   firehose:
-    build: 
+    build:
       context: .
       dockerfile: Dockerfile
     environment:
@@ -23,6 +23,8 @@ services:
       - CLICKHOUSE_DATABASE=default
     depends_on:
       - clickhouse
+    volumes:
+      - ./seq.txt:/app/seq.txt
 
   webapp:
     build:
@@ -52,4 +54,4 @@ services:
 volumes:
   clickhouse_data:
   clickhouse_logs:
-  bluehoover_logs: 
+  bluehoover_logs:

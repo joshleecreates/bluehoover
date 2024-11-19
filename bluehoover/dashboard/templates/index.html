@@ -3,97 +3,155 @@
 <head>
     <title>BlueHoover Dashboard</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-YVWQE8QN5N"></script>
+    <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+
+    gtag('config', 'G-YVWQE8QN5N');
+    </script>
+
     <style>
-        .chart-container {
-            width: 80%;
-            margin: 20px auto;
-            padding: 20px;
-            background: #f5f5f5;
-            border-radius: 8px;
+        body {
+            margin: 0;
+            padding: 15px 15px 0 15px;
+            font-family: Arial, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
         }
-        
-        .input-container {
-            width: 80%;
-            margin: 20px auto;
-            text-align: center;
-            padding: 20px;
-            background: #f5f5f5;
-            border-radius: 8px;
-        }
-        
-        .input-container input {
-            width: 300px;
-            padding: 8px;
-            margin-right: 10px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-        }
-        
-        .input-container button {
-            padding: 8px 16px;
-            background-color: #4CAF50;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-        
-        .input-container button:hover {
-            background-color: #45a049;
-        }
-        
+
         h1 {
             text-align: center;
             color: #333;
-            font-family: Arial, sans-serif;
+            font-size: clamp(1.5rem, 4vw, 2rem);
             margin: 15px 0;
         }
-        
-        .time-controls {
-            width: 80%;
-            margin: 20px auto;
-            text-align: center;
-            padding: 10px;
-            background: #f5f5f5;
-            border-radius: 8px;
-        }
-        
-        .time-button {
-            padding: 8px 16px;
-            margin: 0 5px;
-            border: 1px solid #4CAF50;
-            background-color: white;
-            color: #4CAF50;
-            border-radius: 4px;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-        
-        .time-button:hover {
-            background-color: #4CAF50;
-            color: white;
-        }
-        
-        .time-button.active {
-            background-color: #4CAF50;
-            color: white;
-        }
-        
+
         .intro-container {
-            width: 80%;
+            width: min(80%, 1200px);
             margin: 10px auto;
             padding: 12px;
             background: #f5f5f5;
             border-radius: 8px;
             text-align: center;
             color: #666;
-            font-family: Arial, sans-serif;
             line-height: 1.4;
         }
-        
+
         .intro-container p {
             margin: 0;
+            font-size: clamp(0.875rem, 2vw, 1rem);
+        }
+
+        .input-container {
+            width: min(80%, 1200px);
+            margin: 20px auto;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .input-container input {
+            flex: 1;
+            min-width: 200px;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: clamp(0.875rem, 2vw, 1rem);
+        }
+
+        .input-container button {
+            padding: 8px 16px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: clamp(0.875rem, 2vw, 1rem);
+            white-space: nowrap;
+        }
+
+        .input-container button:hover {
+            background: #45a049;
+        }
+
+        .chart-container {
+            width: min(80%, 1200px);
+            margin: 20px auto;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            height: min(60vh, 400px);
+        }
+
+        @media (max-width: 600px) {
+            body {
+                padding: 10px 10px 0 10px;
+            }
+
+            .intro-container,
+            .input-container,
+            .chart-container {
+                width: 95%;
+                padding: 10px;
+            }
+
+            .input-container {
+                flex-direction: column;
+            }
+
+            .input-container input,
+            .input-container button {
+                width: 100%;
+            }
+
+        }
+
+        .footer {
+            width: 100vw;
+            background: #f5f5f5;
+            margin-top: 40px;
+            padding: 20px 0;
+            border-top: 1px solid #ddd;
+            margin-left: calc(-50vw + 50%);
+            margin-right: calc(-50vw + 50%);
+            margin-bottom: 0;
+        }
+
+        .footer-content {
+            width: min(80%, 1200px);
+            margin: 0 auto;
+            text-align: center;
+            color: #666;
             font-size: 14px;
+            padding: 0 15px;
+        }
+
+        .footer a {
+            color: #666;
+            text-decoration: none;
+            border-bottom: 1px dotted #999;
+            transition: color 0.2s ease, border-bottom-color 0.2s ease;
+        }
+
+        .footer a:hover {
+            color: #333;
+            border-bottom-color: #666;
+        }
+
+        .footer a:visited {
+            color: #777;
+        }
+
+        @media (max-width: 600px) {
+            .footer-content {
+                width: 95%;
+            }
         }
     </style>
 </head>
@@ -116,6 +174,12 @@
     <div class="chart-container">
         <canvas id="postsTimeline"></canvas>
     </div>
+
+    <footer class="footer">
+        <div class="footer-content">
+            <p><a href="https://github.com/josephredfern/bluehoover">Source</a> | <a href="https://bsky.app/profile/josephredfern.bsky.social">BlueSky</a></p>
+        </div>
+    </footer>
 
     <script>
         let customWordChart = null;
@@ -163,6 +227,7 @@
                     },
                     options: {
                         responsive: true,
+                        maintainAspectRatio: false,
                         scales: {
                             x: {
                                 title: {
@@ -230,6 +295,7 @@
                     },
                     options: {
                         responsive: true,
+                        maintainAspectRatio: false,
                         scales: {
                             x: {
                                 title: {

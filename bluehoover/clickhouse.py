@@ -26,7 +26,7 @@ _INTERESTED_RECORDS = {
     models.ids.AppBskyGraphFollow: models.AppBskyGraphFollow,
 }
 
-BATCH_SIZE = 256
+BATCH_SIZE = 1024
 CLICKHOUSE_HOST = os.getenv('CLICKHOUSE_HOST', 'localhost')
 CLICKHOUSE_PORT = int(os.getenv('CLICKHOUSE_PORT', '8123'))
 CLICKHOUSE_DATABASE = os.getenv('CLICKHOUSE_DATABASE', 'default')
@@ -199,20 +199,25 @@ async def signal_handler(_: int, __: FrameType) -> None:
             logger.success('Successfully processed remaining posts')
         except asyncio.TimeoutError:
             logger.warning('Timeout reached while processing remaining posts')
-    
+
     # Stop receiving new messages
     await client.stop()
 
 async def main(firehose_client: AsyncFirehoseSubscribeReposClient) -> None:
     # Start the batch processor
     processor_task = asyncio.create_task(batch_processor())
-    
+
     async def on_message_handler(message: firehose_models.MessageFrame) -> None:
         commit = parse_subscribe_repos_message(message)
         if not isinstance(commit, models.ComAtprotoSyncSubscribeRepos.Commit):
             return
 
         if commit.seq % 20 == 0:
+            if commit.seq % 1000 == 0:
+                logger.info(f"Cursor is at {commit.seq}")
+                with open("seq.txt", "w") as seq_f:
+                    seq_f.write(f"{commit.seq}")
+            asyncio.sleep(0)
             firehose_client.update_params(models.ComAtprotoSyncSubscribeRepos.Params(cursor=commit.seq))
 
         if not commit.blocks:
@@ -247,6 +252,11 @@ if __name__ == '__main__':
     signal.signal(signal.SIGINT, lambda _, __: asyncio.create_task(signal_handler(_, __)))
 
     start_cursor = None
+    try:
+        with open("seq.txt", "r") as seq:
+            start_cursor = int(seq.read().strip())
+    except Exception:
+        pass
 
     params = None
     if start_cursor is not None:

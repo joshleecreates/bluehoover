@@ -114,10 +114,11 @@ async def get_custom_word_timeline(word_list: WordList):
     end_time = datetime.now()
     start_time = end_time - timedelta(days=1)
     
+    # Use match() to ensure we're matching whole words
     query = f"""
         SELECT 
             toStartOfInterval(created_at, INTERVAL 10 MINUTE) as interval_start,
-            {', '.join([f'countIf(positionCaseInsensitive(text, %(word_{i})s) > 0)' for i in range(len(sanitized_words))])}
+            {', '.join([f'countIf(match(lower(text), %(pattern_{i})s))' for i in range(len(sanitized_words))])}
         FROM posts
         WHERE created_at >= %(start_time)s 
           AND created_at < %(end_time)s
@@ -125,10 +126,11 @@ async def get_custom_word_timeline(word_list: WordList):
         ORDER BY interval_start
     """
     
+    # Create regex patterns with word boundaries
     parameters = {
         'start_time': start_time,
         'end_time': end_time,
-        **{f'word_{i}': word for i, word in enumerate(sanitized_words)}
+        **{f'pattern_{i}': f'\\b{word}\\b' for i, word in enumerate(sanitized_words)}
     }
     
     result = client.query(query, parameters=parameters)
