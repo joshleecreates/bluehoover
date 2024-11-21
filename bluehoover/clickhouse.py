@@ -1,116 +1,305 @@
 import asyncio
 from datetime import datetime
 import signal
-from collections import defaultdict
-from types import FrameType
-from typing import List, Optional
+import time
+import ujson
+import websockets
+import os
+
 import clickhouse_connect
 from clickhouse_connect.driver.client import Client
 from clickhouse_connect.driver.exceptions import ClickHouseError
 import backoff
-import os
+
+from pathlib import Path
+
 from loguru import logger
 
-from atproto import (
-    CAR,
-    AsyncFirehoseSubscribeReposClient,
-    AtUri,
-    firehose_models,
-    models,
-    parse_subscribe_repos_message,
-)
-
-_INTERESTED_RECORDS = {
-    models.ids.AppBskyFeedLike: models.AppBskyFeedLike,
-    models.ids.AppBskyFeedPost: models.AppBskyFeedPost,
-    models.ids.AppBskyGraphFollow: models.AppBskyGraphFollow,
-}
-
-BATCH_SIZE = 1024
-CLICKHOUSE_HOST = os.getenv("CLICKHOUSE_HOST", "localhost")
-CLICKHOUSE_PORT = int(os.getenv("CLICKHOUSE_PORT", "8123"))
-CLICKHOUSE_DATABASE = os.getenv("CLICKHOUSE_DATABASE", "default")
-CLICKHOUSE_TABLE = "posts"
-
-post_queue: asyncio.Queue = asyncio.Queue()
-
-# Add retry configuration
+CURSOR_FILENAME = Path(__file__).parent.parent / "cursor.txt"
 MAX_RETRIES = 3
-INITIAL_WAIT_SECONDS = 1
-MAX_WAIT_SECONDS = 10
 
 
-def _get_ops_by_type(commit: models.ComAtprotoSyncSubscribeRepos.Commit) -> defaultdict:
-    operation_by_type = defaultdict(lambda: {"created": [], "deleted": []})
+class JetstreamHoover:
+    def __init__(
+        self,
+        url: str = "wss://jetstream2.us-west.bsky.network/subscribe",
+        batch_size: int = 8192,
+        timeout: float = 5.0,
+    ):
+        self.url = url
+        self.post_queue = asyncio.Queue()
+        self.batch_size = batch_size
+        self.timeout = timeout
+        self.cursor = self.get_checkpoint()
+        self.websocket_task = None
+        self.running = True
 
-    car = CAR.from_bytes(commit.blocks)
-    for op in commit.ops:
-        uri = AtUri.from_str(f"at://{commit.repo}/{op.path}")
+        signal.signal(
+            signal.SIGINT, lambda _, __: asyncio.create_task(self.signal_handler())
+        )
 
-        if op.action == "create":
-            if not op.cid:
-                continue
+    async def signal_handler(self) -> None:
+        logger.warning("Keyboard interrupt received. Stopping...")
+        self.running = False
 
-            create_info = {
-                "uri": str(uri),
-                "cid": str(op.cid),
-                "author": commit.repo,
-                "path": op.path,
-            }
+        tasks_to_cancel = []
 
-            record_raw_data = car.blocks.get(op.cid)
-            if not record_raw_data:
-                continue
+        # Cancel websocket task
+        if self.websocket_task and not self.websocket_task.done():
+            tasks_to_cancel.append(self.websocket_task)
 
-            record = models.get_or_create(record_raw_data, strict=False)
-            record_type = _INTERESTED_RECORDS.get(uri.collection)
-            if record_type and models.is_record_type(record, record_type):
-                operation_by_type[uri.collection]["created"].append(
-                    {"record": record, **create_info}
-                )
-
-        if op.action == "delete":
-            operation_by_type[uri.collection]["deleted"].append({"uri": str(uri)})
-
-    return operation_by_type
-
-
-@backoff.on_exception(
-    backoff.expo, (ClickHouseError, ConnectionError), max_tries=MAX_RETRIES, max_time=30
-)
-async def process_batch(client: Client, batch: List[dict]) -> None:
-    if not batch:
-        return
-
-    try:
-        # Prepare data for insertion
-        data = []
-        for post in batch:
+        # Wait for queue to process remaining items
+        if not self.post_queue.empty():
+            logger.info("Waiting for remaining posts to be processed (5s timeout)...")
             try:
-                created_at = datetime.fromisoformat(
-                    post["created_at"].replace("Z", "+00:00")
-                )
-                data.append(
-                    [
-                        post["cid"],
-                        post["uri"],
-                        created_at,
-                        post["author"],
-                        post.get("text") or "",
-                        post.get("reply_parent_uri") or "",
-                    ]
-                )
-            except (KeyError, ValueError) as e:
-                logger.warning(f"Skipping malformed post: {str(e)}, {post}")
-                continue
+                await asyncio.wait_for(self.post_queue.join(), timeout=5.0)
+                logger.success("Successfully processed remaining posts")
+            except asyncio.TimeoutError:
+                logger.warning("Timeout reached while processing remaining posts")
+                if self.process_task and not self.process_task.done():
+                    tasks_to_cancel.append(self.process_task)
 
-        if not data:
-            return
+        # Wait for all tasks to be cancelled
+        if tasks_to_cancel:
+            logger.info("Waiting for tasks to cancel...")
+            await asyncio.gather(*tasks_to_cancel, return_exceptions=True)
 
-        # Insert data into ClickHouse
+        logger.info("Shutdown complete")
+
+    def get_checkpoint(self) -> int | None:
+        try:
+            with open(CURSOR_FILENAME, "r") as f:
+                return int(f.read())
+        except FileNotFoundError:
+            return None
+
+    async def start(self):
+        try:
+            self.websocket_task = asyncio.create_task(self.slurp_websocket())
+            self.process_task = asyncio.create_task(self.process_queue())
+
+            await asyncio.gather(
+                self.websocket_task, self.process_task, return_exceptions=True
+            )
+        finally:
+            if self.websocket_task and not self.websocket_task.done():
+                self.websocket_task.cancel()
+                try:
+                    await self.websocket_task
+                except asyncio.CancelledError:
+                    pass
+            if self.process_task and not self.process_task.done():
+                self.process_task.cancel()
+                try:
+                    await self.process_task
+                except asyncio.CancelledError:
+                    pass
+
+    async def process_queue(self):
+        clickhouse = ClickHouseManager()
+        batch = []
+        last_insert = time.monotonic()
+
+        while self.running:
+            try:
+                record = await asyncio.wait_for(
+                    self.post_queue.get(), timeout=self.timeout
+                )
+                batch.append(record)
+
+                if len(batch) >= self.batch_size or (
+                    time.monotonic() - last_insert > self.timeout
+                ):
+                    logger.info(
+                        f"Triggering insert of {len(batch)} records, last insert {time.monotonic() - last_insert:.2f}s ago"
+                    )
+
+                    client = await clickhouse.get_client()
+                    await self.insert_batch(client, batch)
+                    self.post_queue.task_done()
+
+                    last_insert = time.monotonic()
+                    batch = []
+            except asyncio.TimeoutError:
+                if batch and self.running:
+                    logger.info(
+                        f"Queue timeout reached - writing batch of {len(batch)} records on time grounds"
+                    )
+
+                    client = await clickhouse.get_client()
+                    await self.insert_batch(client, batch)
+                    self.post_queue.task_done()
+
+                    last_insert = time.monotonic()
+                    batch = []
+            except asyncio.CancelledError:
+                logger.info("Process queue cancelled")
+                if batch:
+                    try:
+                        client = await clickhouse.get_client()
+                        await self.insert_batch(client, batch)
+                        self.post_queue.task_done()
+                    except Exception as e:
+                        logger.error(f"Error processing final batch: {e}")
+                raise
+
+    @backoff.on_exception(
+        backoff.expo,
+        (ConnectionError, TimeoutError),
+        max_tries=MAX_RETRIES,
+        max_time=30,
+    )
+    async def slurp_websocket(self):
+        url = self.url + "?wantedCollections=app.bsky.feed.post&compression=True"
+
+        if self.cursor:
+            url += f"&cursor={self.cursor}"
+
+        try:
+            async for ws in websockets.connect(
+                self.url + "?wantedCollections=app.bsky.feed.post&compression=True"
+            ):
+                logger.info(f"Connected to {self.url}")
+                try:
+                    async for data in ws:
+                        if not self.running:
+                            logger.info("Stopping websocket connection...")
+                            await ws.close()
+                            break
+                        self.handle_message(data)
+                except websockets.exceptions.ConnectionClosed:
+                    if self.running:
+                        logger.warning("Websocket connection closed, reconnecting...")
+                    continue
+
+                if not self.running:
+                    break
+
+                # Yield to allow other tasks to run
+                await asyncio.sleep(0)
+        except asyncio.CancelledError:
+            logger.info("Websocket task cancelled")
+            raise
+
+    def handle_message(self, data: str):
+        """Handle incoming messages from the websocket.
+
+        Depending on the parameters passed to the websocket, we could end up with different types of messages - for now
+        we'll just handle post creation.
+        """
+
+        message = ujson.loads(data)
+
+        match message.get("commit", {}).get("operation"):
+            case "create":
+                self.handle_create(message)
+            case _:
+                pass
+
+    def handle_create(self, message: dict):
+        """Handle post creation - extract the data we want and put it in the queue for insertion
+
+        Example payload:
+        ```
+        {
+            "did": "did:plc:t7prddsjja2omguswnc6z7sn",
+            "time_us": 1732226394053386,
+            "kind": "commit",
+            "commit": {
+                "rev": "3lbihksrxoi23",
+                "operation": "create",
+                "collection": "app.bsky.feed.post",
+                "rkey": "3lbihksecec2h",
+                "record": {
+                "$type": "app.bsky.feed.post",
+                "createdAt": "2024-11-21T21:59:31.102Z",
+                "langs": [
+                    "en"
+                ],
+                "text": "This is a test message!"
+                },
+                "cid": "bafyreiasskmx56dhpv4i47z35zfliev2pkjv3ic5s6kvgih5ngn75k6s3u"
+            }
+        }
+        ```
+
+        Example reply payload:
+        ```
+        {
+            "did": "did:plc:t7prddsjja2omguswnc6z7sn",
+            "time_us": 1732226643666081,
+            "kind": "commit",
+            "commit": {
+                "rev": "3lbihrzttft2d",
+                "operation": "create",
+                "collection": "app.bsky.feed.post",
+                "rkey": "3lbihry4yik2h",
+                "record": {
+                "$type": "app.bsky.feed.post",
+                "createdAt": "2024-11-21T22:03:32.035Z",
+                "langs": [
+                    "en"
+                ],
+                "reply": {
+                    "parent": {
+                    "cid": "bafyreiasskmx56dhpv4i47z35zfliev2pkjv3ic5s6kvgih5ngn75k6s3u",
+                    "uri": "at://did:plc:t7prddsjja2omguswnc6z7sn/app.bsky.feed.post/3lbihksecec2h"
+                    },
+                    "root": {
+                    "cid": "bafyreiasskmx56dhpv4i47z35zfliev2pkjv3ic5s6kvgih5ngn75k6s3u",
+                    "uri": "at://did:plc:t7prddsjja2omguswnc6z7sn/app.bsky.feed.post/3lbihksecec2h"
+                    }
+                },
+                "text": "This is a test message 2"
+                },
+                "cid": "bafyreihag3g5zihxxnq5hnhnlgjz5yqux6sq3ntem4vwvj6wdkkwwekq7a"
+            }
+        }
+        ```
+
+        """
+
+        # Extract out the data we wish to store - it's a bit gross using a tuple but clickhouse
+        # prefers this (and doesn't support dicts?)
+        record = (
+            message.get("did", ""),
+            message.get("commit", {}).get("cid", ""),
+            datetime.fromisoformat(
+                message.get("commit", {})
+                .get("record", {})
+                .get("createdAt", "")
+                .replace("Z", "+00:00")
+            ),
+            message.get("did", ""),
+            message.get("commit", {}).get("record", {}).get("text", ""),
+            message.get("commit", {})
+            .get("record", {})
+            .get("reply", {})
+            .get("parent", {})
+            .get("uri", ""),
+        )
+
+        self.post_queue.put_nowait(record)
+
+        time_us = message.get("time_us", 0)
+
+        if self.cursor is None or time_us > self.cursor + 5_000_000:
+            logger.info(f"Writing checkpoint at {time_us}")
+            with open(CURSOR_FILENAME, "w") as f:
+                f.write(str(time_us))
+            self.cursor = time_us
+
+        # logger.info(f"Enqueued post: {record[1]}")
+
+    async def insert_batch(self, client: Client, batch: list[tuple]) -> None:
+        """
+        Take a batch of posts and insert them into ClickHouse
+        """
+
+        logger.info(f"Inserting batch of {len(batch)} records")
         client.insert(
-            CLICKHOUSE_TABLE,
-            data,
+            "posts",
+            batch,
             column_names=[
                 "cid",
                 "uri",
@@ -120,15 +309,11 @@ async def process_batch(client: Client, batch: List[dict]) -> None:
                 "reply_parent_uri",
             ],
         )
-        logger.info(f"Inserted batch of {len(data)} posts")
-    except Exception as e:
-        logger.error(f"Error inserting batch: {str(e)}")
-        raise
 
 
 class ClickHouseManager:
     def __init__(self):
-        self.client: Optional[Client] = None
+        self.client: Client | None = None
         self.reconnect_lock = asyncio.Lock()
 
     async def get_client(self) -> Client:
@@ -147,9 +332,9 @@ class ClickHouseManager:
     async def connect(self) -> None:
         try:
             self.client = clickhouse_connect.get_client(
-                host=CLICKHOUSE_HOST,
-                port=CLICKHOUSE_PORT,
-                database=CLICKHOUSE_DATABASE,
+                host=os.getenv("CLICKHOUSE_HOST", "localhost"),
+                port=int(os.getenv("CLICKHOUSE_PORT", "8123")),
+                database=os.getenv("CLICKHOUSE_DATABASE", "default"),
                 username=os.getenv("CLICKHOUSE_USER", "default"),
                 password=os.getenv("CLICKHOUSE_PASSWORD", ""),
             )
@@ -175,122 +360,20 @@ class ClickHouseManager:
             raise
 
 
-async def batch_processor() -> None:
-    clickhouse = ClickHouseManager()
-    batch = []
-
-    while True:
-        try:
-            # Get post from queue with timeout
-            try:
-                post = await asyncio.wait_for(post_queue.get(), timeout=5.0)
-                batch.append(post)
-                post_queue.task_done()
-            except asyncio.TimeoutError:
-                if batch:  # Process partial batch on timeout
-                    client = await clickhouse.get_client()
-                    await process_batch(client, batch)
-                    batch = []
-                continue
-
-            # Process batch if it reaches BATCH_SIZE
-            if len(batch) >= BATCH_SIZE:
-                client = await clickhouse.get_client()
-                await process_batch(client, batch)
-                batch = []
-
-        except Exception as e:
-            logger.error(f"Error in batch processor: {e}")
-            # Don't clear the batch - it will retry on next iteration
-
-
-async def queue_for_insertion(post: dict) -> None:
-    await post_queue.put(post)
-
-
-async def signal_handler(_: int, __: FrameType) -> None:
-    logger.warning("Keyboard interrupt received. Stopping...")
-
-    # Wait for queue to be empty with a 10-second timeout
-    if not post_queue.empty():
-        logger.info("Waiting for remaining posts to be processed (5s timeout)...")
-        try:
-            await asyncio.wait_for(post_queue.join(), timeout=5.0)
-            logger.success("Successfully processed remaining posts")
-        except asyncio.TimeoutError:
-            logger.warning("Timeout reached while processing remaining posts")
-
-    # Stop receiving new messages
-    await client.stop()
-
-
-async def main(firehose_client: AsyncFirehoseSubscribeReposClient) -> None:
-    # Start the batch processor
-    processor_task = asyncio.create_task(batch_processor())
-
-    async def on_message_handler(message: firehose_models.MessageFrame) -> None:
-        commit = parse_subscribe_repos_message(message)
-        if not isinstance(commit, models.ComAtprotoSyncSubscribeRepos.Commit):
-            return
-
-        if commit.seq % 20 == 0:
-            if commit.seq % 1000 == 0:
-                logger.info(f"Cursor is at {commit.seq}")
-                with open("seq.txt", "w") as seq_f:
-                    seq_f.write(f"{commit.seq}")
-            asyncio.sleep(0)
-            firehose_client.update_params(
-                models.ComAtprotoSyncSubscribeRepos.Params(cursor=commit.seq)
-            )
-
-        if not commit.blocks:
-            return
-
-        ops = _get_ops_by_type(commit)
-        for created_post in ops[models.ids.AppBskyFeedPost]["created"]:
-            post = {
-                "cid": created_post["cid"],
-                "uri": created_post["uri"],
-                "created_at": created_post["record"].created_at,
-                "author": created_post["author"],
-                "text": created_post["record"].text,
-                "reply_parent_uri": created_post["record"].reply.parent.uri
-                if created_post["record"].reply
-                else None,
-            }
-
-            await queue_for_insertion(post)
-
-    try:
-        await client.start(on_message_handler)
-    finally:
-        # Wait for processor task to complete
-        if not post_queue.empty():
-            await post_queue.join()
-        processor_task.cancel()
-        try:
-            await processor_task
-        except asyncio.CancelledError:
-            pass
-
-
 if __name__ == "__main__":
-    signal.signal(
-        signal.SIGINT, lambda _, __: asyncio.create_task(signal_handler(_, __))
-    )
+    logger.info("Starting JetstreamHoover...")
 
-    start_cursor = None
+    # Create event loop explicitly
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    hoover = JetstreamHoover()
+
     try:
-        with open("seq.txt", "r") as seq:
-            start_cursor = int(seq.read().strip())
-    except Exception:
-        pass
-
-    params = None
-    if start_cursor is not None:
-        params = models.ComAtprotoSyncSubscribeRepos.Params(cursor=start_cursor)
-
-    client = AsyncFirehoseSubscribeReposClient(params)
-
-    # use run() for a higher Python version
-    asyncio.get_event_loop().run_until_complete(main(client))
+        loop.run_until_complete(hoover.start())
+    except KeyboardInterrupt:
+        logger.info("KeyboardInterrupt received in main...")
+        # Run the signal handler in the event loop
+        loop.run_until_complete(hoover.signal_handler())
+    finally:
+        loop.close()
