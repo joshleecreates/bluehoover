@@ -153,6 +153,59 @@
                 width: 95%;
             }
         }
+
+        .trending-container {
+            width: min(80%, 1200px);
+            margin: 20px auto;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .trending-container h2 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 10px;
+        }
+        
+        #trending-time {
+            text-align: center;
+            color: #666;
+            font-size: 0.9em;
+            margin-bottom: 20px;
+        }
+        
+        #trending-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        #trending-table th,
+        #trending-table td {
+            padding: 8px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        #trending-table th {
+            background-color: #f5f5f5;
+            font-weight: bold;
+        }
+        
+        .track-button {
+            padding: 4px 8px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9em;
+        }
+        
+        .track-button:hover {
+            background: #45a049;
+        }
     </style>
 </head>
 <body>
@@ -169,6 +222,26 @@
 
     <div class="chart-container">
         <canvas id="customWordChart"></canvas>
+    </div>
+
+    <!-- New trending section -->
+    <div class="trending-container">
+        <h2>Trending Topics</h2>
+        <p class="intro-container" style="width: 100%; margin: 0 0 20px 0; box-sizing: border-box;">
+            Trending topics are identified by their "uplift" - how much more frequently they appear in the last hour compared to their average over the last 48 hours.
+        </p>
+        <p id="trending-time"></p>
+        <table id="trending-table">
+            <thead>
+                <tr>
+                    <th>Topic</th>
+                    <th>Uplift</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+            </tbody>
+        </table>
     </div>
 
     <div class="chart-container">
@@ -333,6 +406,49 @@
             }
         }
 
+        async function updateTrending() {
+            try {
+                const response = await fetch('/api/trending');
+                const data = await response.json();
+                
+                // Update refresh time
+                const refreshTime = new Date(data.refresh_time);
+                document.getElementById('trending-time').textContent = 
+                    `Last updated: ${refreshTime.toLocaleTimeString()}`;
+                
+                // Update table
+                const tbody = document.getElementById('trending-table').getElementsByTagName('tbody')[0];
+                tbody.innerHTML = '';
+                
+                data.trends.forEach(trend => {
+                    const row = tbody.insertRow();
+                    
+                    const tokenCell = row.insertCell();
+                    tokenCell.textContent = trend.token;
+                    
+                    const upliftCell = row.insertCell();
+                    upliftCell.textContent = `${trend.uplift}×`;
+                    
+                    const actionCell = row.insertCell();
+                    const trackButton = document.createElement('button');
+                    trackButton.textContent = 'Track';
+                    trackButton.className = 'track-button';
+                    trackButton.onclick = () => {
+                        const input = document.getElementById('customWords');
+                        const currentWords = input.value.trim();
+                        input.value = currentWords ? `${currentWords} ${trend.token}` : trend.token;
+                        updateCustomWordChart();
+                    };
+                    actionCell.appendChild(trackButton);
+                });
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        }
+        
+        // Update trending data every minute
+        setInterval(updateTrending, 60000);
+        
         function handleKeyPress(event) {
             if (event.key === 'Enter') {
                 event.preventDefault();  // Prevent form submission if within a form
@@ -344,6 +460,7 @@
         document.addEventListener('DOMContentLoaded', function() {
             updateCustomWordChart();
             updateCharts();
+            updateTrending();
         });
     </script>
 </body>

@@ -178,3 +178,37 @@ async def get_custom_word_timeline(word_list: WordList):
         datasets.append({"label": word, "data": data, "color": color})
 
     return {"labels": times, "datasets": datasets}
+
+
+@app.get("/api/trending")
+async def get_trending():
+    client = get_clickhouse_client()
+
+    query = """
+    SELECT 
+        token, 
+        1hr_count/48hr_avg as uplift,
+        refresh_time
+    FROM trends_1hr 
+    WHERE refresh_time = (
+        SELECT max(refresh_time) 
+        FROM trends_1hr
+    ) 
+    ORDER BY uplift DESC 
+    LIMIT 30
+    """
+
+    result = client.query(query)
+
+    return {
+        "trends": [
+            {
+                "token": row[0],
+                "uplift": round(
+                    float(row[1]), 2
+                ),  # Convert to float and round for display
+            }
+            for row in result.result_rows
+        ],
+        "refresh_time": result.result_rows[0][2] if result.result_rows else None,
+    }
