@@ -390,7 +390,7 @@ class ClickHouseManager:
 
             create_trends_48hr_table_query = """
             CREATE MATERIALIZED VIEW IF NOT EXISTS trends_1hr_mv
-            REFRESH EVERY 30 MINUTE TO trends_1hr
+            REFRESH EVERY 30 MINUTE APPEND TO trends_1hr
             (
                 `timestamp` DateTime,
                 `token` String,

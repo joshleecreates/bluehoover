@@ -159,11 +159,11 @@
     <h1>BlueHoover - BlueSky Firehose Analysis</h1>
     
     <div class="intro-container">
-        <p>This is a limited interface on top of a ClickHouse database connected to the BlueSky firehose. You can enter comma-separated terms to track, and the chart will update to show the frequency of those terms over the last 24hrs.</p>
+        <p>This is a limited interface on top of a ClickHouse database connected to the BlueSky firehose. You can enter space-separated terms to track, and the chart will update to show the frequency of those terms over the last 24hrs.</p>
     </div>
     
     <div class="input-container">
-        <input type="text" id="customWords" placeholder="Enter words to track (comma separated)" value="dogs, cats, raccoons, squirrels, badgers" onkeypress="handleKeyPress(event)">
+        <input type="text" id="customWords" placeholder="Enter words to track (space separated)" value="dogs cats raccoons squirrels badgers" onkeypress="handleKeyPress(event)">
         <button onclick="updateCustomWordChart()">Track Words</button>
     </div>
 
@@ -187,8 +187,7 @@
         
         async function updateCustomWordChart() {
             const wordsInput = document.getElementById('customWords').value;
-            const words = wordsInput.split(',')
-                .map(word => word.trim())
+            const words = wordsInput.split(' ')
                 .filter(word => word.length > 0);
             
             if (words.length === 0) {

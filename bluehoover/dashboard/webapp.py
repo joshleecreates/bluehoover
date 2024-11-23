@@ -111,52 +111,70 @@ class WordList(BaseModel):
 async def get_custom_word_timeline(word_list: WordList):
     # Sanitize input words
     sanitized_words = [
-        re.sub(r"[^a-zA-Z0-9\s]", "", word.lower())[:50]
-        for word in word_list.words
-        if len(word.strip()) > 0
+        word.lower().strip()[:100] for word in word_list.words if len(word.strip()) > 0
     ][:10]
 
     if not sanitized_words:
         return {"error": "No valid words provided"}
 
     client = get_clickhouse_client()
-    end_time = datetime.now()
-    start_time = end_time - timedelta(days=1)
 
-    # Use match() to ensure we're matching whole words
-    query = f"""
-        SELECT 
-            toStartOfInterval(created_at, INTERVAL 10 MINUTE) as interval_start,
-            {', '.join([f'countIf(match(lower(text), %(pattern_{i})s))' for i in range(len(sanitized_words))])}
-        FROM posts
-        WHERE created_at >= %(start_time)s 
-          AND created_at < %(end_time)s
-        GROUP BY interval_start
-        ORDER BY interval_start
+    # This query returns token and then an array of counts for each 10 minute period in the last 24 hours
+    query = """
+    SELECT
+        token,
+        groupArray(count)
+    FROM
+    (
+        SELECT
+        periods.period AS period,
+        wanted_tokens.token AS token,
+        COALESCE(fast_results.count, 0) AS count
+    FROM
+    (
+        SELECT toStartOfInterval(now() - toIntervalMinute(number * 10), toIntervalMinute(10)) AS period
+        FROM numbers(6 * 24)
+    ) AS periods
+    CROSS JOIN
+    (
+        SELECT arrayJoin(%(tokens)s) AS token
+    ) AS wanted_tokens
+    LEFT JOIN
+    (
+        SELECT
+            period,
+            token,
+            sum(count) AS count
+        FROM tokens_by_interval
+        WHERE (token IN %(tokens)s) AND (period >= toStartOfInterval(now() - toIntervalHour(24), toIntervalMinute(10)))
+        GROUP BY
+            period,
+            token
+    ) AS fast_results ON (periods.period = fast_results.period) AND (wanted_tokens.token = fast_results.token)
+    ORDER BY
+        periods.period ASC,
+        wanted_tokens.token ASC
+)
+        GROUP BY token
     """
 
-    # Create regex patterns with word boundaries
-    parameters = {
-        "start_time": start_time,
-        "end_time": end_time,
-        **{f"pattern_{i}": f"\\b{word}\\b" for i, word in enumerate(sanitized_words)},
-    }
+    result = client.query(query, parameters={"tokens": sanitized_words})
 
-    result = client.query(query, parameters=parameters)
+    # Create time labels for last 24 hours in 10-minute intervals
+    now = datetime.now()
+    times = [
+        (now - timedelta(minutes=i * 10)).strftime("%H:%M") for i in range(6 * 24)
+    ][::-1]  # Reverse to get chronological order
 
-    colors = [
-        f'rgba({(hash(word) % 128 + 128)}, {(hash(word + "1") % 128 + 64)}, {(hash(word + "2") % 128 + 64)}, 0.8)'
-        for word in sanitized_words
-    ]
+    datasets = []
+    for word in sanitized_words:
+        color = f'rgba({(hash(word) % 128 + 128)}, {(hash(word + "1") % 128 + 64)}, {(hash(word + "2") % 128 + 64)}, 0.8)'
 
-    times = [row[0].strftime("%H:%M") for row in result.result_rows]
-    datasets = [
-        {
-            "label": word,
-            "data": [row[i + 1] for row in result.result_rows],
-            "color": color,
-        }
-        for i, (word, color) in enumerate(zip(sanitized_words, colors))
-    ]
+        # Find the matching row for this token
+        data = next(
+            (row[1] for row in result.result_rows if row[0] == word), [0] * (6 * 24)
+        )
+
+        datasets.append({"label": word, "data": data, "color": color})
 
     return {"labels": times, "datasets": datasets}
