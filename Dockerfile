@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 RUN apt-get update && apt-get install -y \
     curl \
@@ -14,15 +14,12 @@ RUN pip install poetry
 # Copy poetry files
 COPY pyproject.toml poetry.lock ./
 
-# Copy source code
-COPY bluehoover ./bluehoover
 
 # Install dependencies
 RUN poetry config virtualenvs.create false \
     && poetry install --no-dev --no-interaction --no-ansi
 
-# # Update the clickhouse.py file to use environment variables
-# RUN sed -i 's/CLICKHOUSE_HOST = '\''localhost'\''/CLICKHOUSE_HOST = os.getenv('\''CLICKHOUSE_HOST'\'', '\''localhost'\'')/g' bluehoover/clickhouse.py \
-#     && sed -i '1s/^/import os\n/' bluehoover/clickhouse.py
+# Copy source code
+COPY bluehoover ./bluehoover
 
 CMD ["python", "-m", "bluehoover.clickhouse"] 

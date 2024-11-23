@@ -4,6 +4,7 @@ import signal
 import time
 import ujson
 import websockets
+from websockets.asyncio.client import connect
 import os
 
 import clickhouse_connect
@@ -16,15 +17,15 @@ from pathlib import Path
 from loguru import logger
 
 CURSOR_FILENAME = Path(__file__).parent.parent / "cursor.txt"
-MAX_RETRIES = 3
+MAX_RETRIES = 10
 
 
 class JetstreamHoover:
     def __init__(
         self,
-        url: str = "wss://jetstream2.us-west.bsky.network/subscribe",
-        batch_size: int = 8192,
-        timeout: float = 5.0,
+        url: str = "wss://jetstream2.us-east.bsky.network/subscribe",
+        batch_size: int = 8192 * 2,
+        timeout: float = 5,
     ):
         self.url = url
         self.post_queue = asyncio.Queue()
@@ -70,7 +71,7 @@ class JetstreamHoover:
         try:
             with open(CURSOR_FILENAME, "r") as f:
                 return int(f.read())
-        except FileNotFoundError:
+        except (FileNotFoundError, ValueError, TypeError, OSError):
             return None
 
     async def start(self):
@@ -106,6 +107,7 @@ class JetstreamHoover:
                     self.post_queue.get(), timeout=self.timeout
                 )
                 batch.append(record)
+                self.post_queue.task_done()
 
                 if len(batch) >= self.batch_size or (
                     time.monotonic() - last_insert > self.timeout
@@ -116,11 +118,10 @@ class JetstreamHoover:
 
                     client = await clickhouse.get_client()
                     await self.insert_batch(client, batch)
-                    self.post_queue.task_done()
 
                     last_insert = time.monotonic()
                     batch = []
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 if batch and self.running:
                     logger.info(
                         f"Queue timeout reached - writing batch of {len(batch)} records on time grounds"
@@ -128,7 +129,6 @@ class JetstreamHoover:
 
                     client = await clickhouse.get_client()
                     await self.insert_batch(client, batch)
-                    self.post_queue.task_done()
 
                     last_insert = time.monotonic()
                     batch = []
@@ -138,7 +138,6 @@ class JetstreamHoover:
                     try:
                         client = await clickhouse.get_client()
                         await self.insert_batch(client, batch)
-                        self.post_queue.task_done()
                     except Exception as e:
                         logger.error(f"Error processing final batch: {e}")
                 raise
@@ -151,37 +150,34 @@ class JetstreamHoover:
     )
     async def slurp_websocket(self):
         url = self.url + "?wantedCollections=app.bsky.feed.post&compression=True"
-
         if self.cursor:
             url += f"&cursor={self.cursor}"
 
         try:
-            async for ws in websockets.connect(
-                self.url + "?wantedCollections=app.bsky.feed.post&compression=True"
-            ):
-                logger.info(f"Connected to {self.url}")
+            async for ws in connect(url):
+                logger.info(f"Connected to {url}")
                 try:
-                    async for data in ws:
-                        if not self.running:
-                            logger.info("Stopping websocket connection...")
-                            await ws.close()
-                            break
-                        self.handle_message(data)
+                    while self.running:
+                        data = await asyncio.wait_for(ws.recv(), 1)
+                        await self.handle_message(data)
+                        # Yield to allow other tasks to run
+                        await asyncio.sleep(0)
                 except websockets.exceptions.ConnectionClosed:
-                    if self.running:
-                        logger.warning("Websocket connection closed, reconnecting...")
                     continue
 
-                if not self.running:
+                if self.running:
+                    logger.info("Websocket disconnected, reconnecting...")
+                    continue
+                else:
+                    logger.info("Websocket connection closed")
                     break
-
-                # Yield to allow other tasks to run
-                await asyncio.sleep(0)
+        except websockets.exceptions.ConnectionClosed:
+            logger.info("Websocket connection closed, reconnecting...")
         except asyncio.CancelledError:
             logger.info("Websocket task cancelled")
             raise
 
-    def handle_message(self, data: str):
+    async def handle_message(self, data: str):
         """Handle incoming messages from the websocket.
 
         Depending on the parameters passed to the websocket, we could end up with different types of messages - for now
@@ -192,11 +188,11 @@ class JetstreamHoover:
 
         match message.get("commit", {}).get("operation"):
             case "create":
-                self.handle_create(message)
+                await self.handle_create(message)
             case _:
                 pass
 
-    def handle_create(self, message: dict):
+    async def handle_create(self, message: dict) -> None:
         """Handle post creation - extract the data we want and put it in the queue for insertion
 
         Example payload:
@@ -279,7 +275,7 @@ class JetstreamHoover:
             .get("uri", ""),
         )
 
-        self.post_queue.put_nowait(record)
+        await self.post_queue.put(record)
 
         time_us = message.get("time_us", 0)
 
@@ -297,7 +293,7 @@ class JetstreamHoover:
         """
 
         logger.info(f"Inserting batch of {len(batch)} records")
-        client.insert(
+        await client.insert(
             "posts",
             batch,
             column_names=[
@@ -309,17 +305,18 @@ class JetstreamHoover:
                 "reply_parent_uri",
             ],
         )
+        logger.info(f"Inserted batch of {len(batch)} records")
 
 
 class ClickHouseManager:
     def __init__(self):
-        self.client: Client | None = None
+        self.client = None
         self.reconnect_lock = asyncio.Lock()
 
-    async def get_client(self) -> Client:
+    async def get_client(self):
         if self.client is None:
             async with self.reconnect_lock:
-                if self.client is None:  # Double-check pattern
+                if self.client is None:
                     await self.connect()
         return self.client
 
@@ -331,7 +328,7 @@ class ClickHouseManager:
     )
     async def connect(self) -> None:
         try:
-            self.client = clickhouse_connect.get_client(
+            self.client = await clickhouse_connect.get_async_client(
                 host=os.getenv("CLICKHOUSE_HOST", "localhost"),
                 port=int(os.getenv("CLICKHOUSE_PORT", "8123")),
                 database=os.getenv("CLICKHOUSE_DATABASE", "default"),
@@ -340,7 +337,7 @@ class ClickHouseManager:
             )
 
             # Create table if it doesn't exist
-            create_table_query = """
+            create_posts_table_query = """
             CREATE TABLE IF NOT EXISTS posts (
                 cid String,
                 uri String,
@@ -352,11 +349,138 @@ class ClickHouseManager:
             ) ENGINE = MergeTree()
             ORDER BY (created_at, cid)
             """
-            self.client.command(create_table_query)
-            logger.info("Connected to ClickHouse and verified table exists")
+
+            create_tokens_by_interval_table_query = """
+            CREATE TABLE IF NOT EXISTS tokens_by_interval
+                (
+                    `period` DateTime64(3),
+                    `token` String,
+                    `count` UInt64
+                )
+                ENGINE = SummingMergeTree
+                ORDER BY (period, token)
+            """
+
+            create_tokenizer_query = """
+            CREATE MATERIALIZED VIEW IF NOT EXISTS tokenizer TO tokens_by_interval
+            (
+                `period` DateTime,
+                `token` String,
+                `count` UInt8
+            )
+            AS SELECT
+                toStartOfInterval(created_at, toIntervalMinute(10)) AS period,
+                arrayJoin(splitByNonAlpha(lower(text))) AS token,
+                1 AS count
+            FROM posts
+            """
+
+            create_trends_1hr_table_query = """
+            CREATE TABLE IF NOT EXISTS trends_1hr
+            (
+                `refresh_time` DateTime64(3) DEFAULT now(),
+                `timestamp` DateTime64(3),
+                `token` String,
+                `1hr_count` UInt64,
+                `48hr_avg` Float32
+            )
+            ENGINE = MergeTree
+            ORDER BY (timestamp, token)
+            """
+
+            create_trends_48hr_table_query = """
+            CREATE MATERIALIZED VIEW IF NOT EXISTS trends_1hr_mv
+            REFRESH EVERY 30 MINUTE TO trends_1hr
+            (
+                `timestamp` DateTime,
+                `token` String,
+                `1hr_count` UInt64,
+                `48hr_avg` Float64
+            )
+            AS WITH
+                1 AS hours_in_period,
+                48 AS hours_in_full_period
+            SELECT
+                toStartOfInterval(now() - toIntervalHour(hours_in_period), toIntervalHour(hours_in_period)) AS timestamp,
+                token AS token,
+                this_period.period_count AS `1hr_count`,
+                full_period.avg_count AS `48hr_avg`
+            FROM
+            (
+                SELECT
+                    toStartOfInterval(period, toIntervalHour(hours_in_period)) AS agg_period,
+                    token,
+                    sum(count) AS period_count
+                FROM tokens_by_interval
+                FINAL
+                WHERE agg_period = toStartOfInterval(now() - toIntervalHour(hours_in_period), toIntervalHour(hours_in_period))
+                GROUP BY
+                    agg_period,
+                    token
+                HAVING period_count >= 250
+            ) AS this_period,
+            (
+                SELECT
+                    token,
+                    sum(count) / hours_in_full_period AS avg_count
+                FROM
+                (
+                    SELECT
+                        toStartOfInterval(period, toIntervalHour(1)) AS agg_period,
+                        token,
+                        sum(count) AS count
+                    FROM tokens_by_interval
+                    WHERE (agg_period > (now() - toIntervalHour(hours_in_full_period + hours_in_period))) AND (agg_period < toStartOfInterval(now() - toIntervalHour(hours_in_period), toIntervalHour(hours_in_full_period)))
+                    GROUP BY
+                        agg_period,
+                        token
+                ) AS avg_token_count_by_period
+                GROUP BY token
+            ) AS full_period
+            WHERE (this_period.token = full_period.token) AND (length(token) > 4) AND (token NOT IN tuple('https')) AND (full_period.avg_count > 10)
+            ORDER BY `1hr_count` / `48hr_avg` DESC
+            LIMIT 100
+"""
+
+            await self.client.command(create_posts_table_query)
+            await self.client.command(create_tokens_by_interval_table_query)
+            await self.client.command(create_tokenizer_query)
+            await self.client.command(create_trends_1hr_table_query)
+            await self.client.command(create_trends_48hr_table_query)
+
+            logger.info("Connected to ClickHouse and verified tables/MVs exists")
         except Exception as e:
             logger.error(f"Error connecting to ClickHouse: {str(e)}")
             self.client = None
+            raise
+
+    async def insert_batch(self, batch: list[tuple]) -> None:
+        """
+        Take a batch of posts and insert them into ClickHouse
+        """
+        if not batch:
+            return
+
+        client = await self.get_client()
+        logger.info(f"Inserting batch of {len(batch)} records")
+
+        try:
+            await client.insert(
+                "posts",
+                batch,
+                column_names=[
+                    "cid",
+                    "uri",
+                    "created_at",
+                    "author",
+                    "text",
+                    "reply_parent_uri",
+                ],
+            )
+            logger.info(f"Successfully inserted batch of {len(batch)} records")
+        except Exception as e:
+            logger.error(f"Error inserting batch: {e}")
+            self.client = None  # Force reconnect on next attempt
             raise
 
 
