@@ -187,13 +187,13 @@ async def get_trending():
     query = """
     SELECT 
         token, 
-        1hr_count/48hr_avg as uplift,
+        1hr_count/24hr_avg as uplift,
         refresh_time
     FROM trends_1hr 
     WHERE refresh_time = (
         SELECT max(refresh_time) 
         FROM trends_1hr
-    ) 
+    ) AND uplift > 2
     ORDER BY uplift DESC 
     LIMIT 30
     """

@@ -382,71 +382,62 @@ class ClickHouseManager:
                 `timestamp` DateTime64(3),
                 `token` String,
                 `1hr_count` UInt64,
-                `48hr_avg` Float32
+                `24hr_avg` Float32
             )
             ENGINE = MergeTree
             ORDER BY (timestamp, token)
             """
 
-            create_trends_48hr_table_query = """
-            CREATE MATERIALIZED VIEW IF NOT EXISTS trends_1hr_mv
-            REFRESH EVERY 30 MINUTE APPEND TO trends_1hr
-            (
-                `timestamp` DateTime,
-                `token` String,
-                `1hr_count` UInt64,
-                `48hr_avg` Float64
-            )
-            AS WITH
-                1 AS hours_in_period,
-                48 AS hours_in_full_period
-            SELECT
-                toStartOfInterval(now() - toIntervalHour(hours_in_period), toIntervalHour(hours_in_period)) AS timestamp,
-                token AS token,
-                this_period.period_count AS `1hr_count`,
-                full_period.avg_count AS `48hr_avg`
-            FROM
-            (
-                SELECT
-                    toStartOfInterval(period, toIntervalHour(hours_in_period)) AS agg_period,
-                    token,
-                    sum(count) AS period_count
-                FROM tokens_by_interval
-                FINAL
-                WHERE agg_period = toStartOfInterval(now() - toIntervalHour(hours_in_period), toIntervalHour(hours_in_period))
-                GROUP BY
-                    agg_period,
-                    token
-                HAVING period_count >= 250
-            ) AS this_period,
-            (
-                SELECT
-                    token,
-                    sum(count) / hours_in_full_period AS avg_count
-                FROM
-                (
-                    SELECT
-                        toStartOfInterval(period, toIntervalHour(1)) AS agg_period,
-                        token,
-                        sum(count) AS count
-                    FROM tokens_by_interval
-                    WHERE (agg_period > (now() - toIntervalHour(hours_in_full_period + hours_in_period))) AND (agg_period < toStartOfInterval(now() - toIntervalHour(hours_in_period), toIntervalHour(hours_in_full_period)))
-                    GROUP BY
-                        agg_period,
-                        token
-                ) AS avg_token_count_by_period
-                GROUP BY token
-            ) AS full_period
-            WHERE (this_period.token = full_period.token) AND (length(token) > 4) AND (token NOT IN tuple('https')) AND (full_period.avg_count > 10)
-            ORDER BY `1hr_count` / `48hr_avg` DESC
-            LIMIT 100
+            create_trends_24hr_table_query = """
+        CREATE MATERIALIZED VIEW IF NOT EXISTS trends_1hr_mv
+REFRESH EVERY 1 HOUR APPEND TO trends_1hr
+(
+    `timestamp` DateTime,
+    `token` String,
+    `1hr_count` UInt64,
+    `24hr_avg` Float64
+)
+AS WITH
+    1 AS hours_in_period,
+    24 AS hours_in_full_period
+SELECT
+    toStartOfInterval(now() - toIntervalHour(hours_in_period), toIntervalHour(hours_in_period)) AS timestamp,
+    token AS token,
+    this_period.period_count AS `1hr_count`,
+    full_period.avg_count AS `24hr_avg`
+FROM
+(
+    SELECT
+        toStartOfInterval(period, toIntervalHour(hours_in_period)) AS agg_period,
+        token,
+        sum(count) AS period_count
+    FROM tokens_by_interval
+    FINAL
+    WHERE agg_period = toStartOfInterval(now() - toIntervalHour(hours_in_period), toIntervalHour(hours_in_period))
+    GROUP BY
+        agg_period,
+        token
+    HAVING period_count >= 250
+) AS this_period,
+(
+    SELECT
+        token,
+        sum(count) / hours_in_full_period AS avg_count
+    FROM tokens_by_interval
+    FINAL
+    WHERE period >= (now() - toIntervalHour(hours_in_full_period))
+    GROUP BY token
+) AS full_period
+WHERE (this_period.token = full_period.token) AND (length(token) > 4) AND (full_period.avg_count > 10)
+ORDER BY `1hr_count` / `24hr_avg` DESC
+LIMIT 100
 """
 
             await self.client.command(create_posts_table_query)
             await self.client.command(create_tokens_by_interval_table_query)
             await self.client.command(create_tokenizer_query)
             await self.client.command(create_trends_1hr_table_query)
-            await self.client.command(create_trends_48hr_table_query)
+            await self.client.command(create_trends_24hr_table_query)
 
             logger.info("Connected to ClickHouse and verified tables/MVs exists")
         except Exception as e:

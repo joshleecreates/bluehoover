@@ -228,7 +228,7 @@
     <div class="trending-container">
         <h2>Trending Topics</h2>
         <p class="intro-container" style="width: 100%; margin: 0 0 20px 0; box-sizing: border-box;">
-            Trending topics are identified by their "uplift" - how much more frequently they appear in the last hour compared to their average over the last 48 hours.
+            Trending topics are identified by their "uplift" - how much more frequently they appear in the last hour compared to their average over the last 24 hours.
         </p>
         <p id="trending-time"></p>
         <table id="trending-table">
@@ -435,8 +435,18 @@
                     trackButton.className = 'track-button';
                     trackButton.onclick = () => {
                         const input = document.getElementById('customWords');
-                        const currentWords = input.value.trim();
-                        input.value = currentWords ? `${currentWords} ${trend.token}` : trend.token;
+                        const currentWords = input.value.trim().split(' ').filter(w => w.length > 0);
+                        
+                        // If this is the first tracked word, replace the default words
+                        if (currentWords.join(' ') === "dogs cats raccoons squirrels badgers") {
+                            input.value = trend.token;
+                        } else {
+                            // Only add if not already being tracked
+                            if (!currentWords.includes(trend.token)) {
+                                input.value = currentWords.length > 0 ? 
+                                    `${currentWords.join(' ')} ${trend.token}` : trend.token;
+                            }
+                        }
                         updateCustomWordChart();
                     };
                     actionCell.appendChild(trackButton);
