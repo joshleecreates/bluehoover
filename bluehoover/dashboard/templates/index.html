@@ -15,7 +15,33 @@
     </script>
 
     <style>
+        :root {
+            --bg-color: #ffffff;
+            --text-color: #333333;
+            --muted-text: #666666;
+            --container-bg: #f5f5f5;
+            --border-color: #dddddd;
+            --shadow-color: rgba(0,0,0,0.1);
+            --button-bg: #4CAF50;
+            --button-hover: #45a049;
+            --chart-bg: #ffffff;
+        }
+
+        [data-theme="dark"] {
+            --bg-color: #1a1a1a;
+            --text-color: #ffffff;
+            --muted-text: #bbbbbb;
+            --container-bg: #2d2d2d;
+            --border-color: #404040;
+            --shadow-color: rgba(0,0,0,0.3);
+            --button-bg: #45a049;
+            --button-hover: #4CAF50;
+            --chart-bg: #2d2d2d;
+        }
+
         body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
             margin: 0;
             padding: 15px 15px 0 15px;
             font-family: Arial, sans-serif;
@@ -26,7 +52,7 @@
 
         h1 {
             text-align: center;
-            color: #333;
+            color: var(--text-color);
             font-size: clamp(1.5rem, 4vw, 2rem);
             margin: 15px 0;
         }
@@ -35,10 +61,10 @@
             width: min(80%, 1200px);
             margin: 10px auto;
             padding: 12px;
-            background: #f5f5f5;
+            background: var(--container-bg);
             border-radius: 8px;
             text-align: center;
-            color: #666;
+            color: var(--muted-text);
             line-height: 1.4;
         }
 
@@ -52,40 +78,55 @@
             margin: 20px auto;
             display: flex;
             gap: 10px;
-            flex-wrap: wrap;
+            align-items: stretch;
+        }
+
+        .input-container input,
+        .input-container select,
+        .input-container button {
+            height: 40px;
+            padding: 8px;
+            border-radius: 4px;
+            font-size: 14px;
+            line-height: 24px;
+            box-sizing: border-box;
         }
 
         .input-container input {
             flex: 1;
-            min-width: 200px;
-            padding: 8px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            font-size: clamp(0.875rem, 2vw, 1rem);
+            border: 1px solid var(--border-color);
+            background: var(--bg-color);
+            color: var(--text-color);
+        }
+
+        .input-container select {
+            width: auto;
+            padding-right: 24px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-color);
+            color: var(--text-color);
         }
 
         .input-container button {
             padding: 8px 16px;
-            background: #4CAF50;
+            background: var(--button-bg);
             color: white;
             border: none;
-            border-radius: 4px;
             cursor: pointer;
-            font-size: clamp(0.875rem, 2vw, 1rem);
             white-space: nowrap;
         }
 
         .input-container button:hover {
-            background: #45a049;
+            background: var(--button-hover);
         }
 
         .chart-container {
             width: min(80%, 1200px);
             margin: 20px auto;
             padding: 15px;
-            background: white;
+            background: var(--chart-bg);
             border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 4px var(--shadow-color);
             height: min(60vh, 400px);
         }
 
@@ -96,7 +137,8 @@
 
             .intro-container,
             .input-container,
-            .chart-container {
+            .chart-container,
+            .trending-container {
                 width: 95%;
                 padding: 10px;
             }
@@ -106,6 +148,7 @@
             }
 
             .input-container input,
+            .input-container select,
             .input-container button {
                 width: 100%;
             }
@@ -114,10 +157,10 @@
 
         .footer {
             width: 100vw;
-            background: #f5f5f5;
+            background: var(--container-bg);
             margin-top: 40px;
             padding: 20px 0;
-            border-top: 1px solid #ddd;
+            border-top: 1px solid var(--border-color);
             margin-left: calc(-50vw + 50%);
             margin-right: calc(-50vw + 50%);
             margin-bottom: 0;
@@ -127,21 +170,21 @@
             width: min(80%, 1200px);
             margin: 0 auto;
             text-align: center;
-            color: #666;
+            color: var(--muted-text);
             font-size: 14px;
             padding: 0 15px;
         }
 
         .footer a {
-            color: #666;
+            color: var(--muted-text);
             text-decoration: none;
             border-bottom: 1px dotted #999;
             transition: color 0.2s ease, border-bottom-color 0.2s ease;
         }
 
         .footer a:hover {
-            color: #333;
-            border-bottom-color: #666;
+            color: var(--text-color);
+            border-bottom-color: var(--muted-text);
         }
 
         .footer a:visited {
@@ -158,20 +201,20 @@
             width: min(80%, 1200px);
             margin: 20px auto;
             padding: 15px;
-            background: white;
+            background: var(--container-bg);
             border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 4px var(--shadow-color);
         }
         
         .trending-container h2 {
             text-align: center;
-            color: #333;
+            color: var(--text-color);
             margin-bottom: 10px;
         }
         
         #trending-time {
             text-align: center;
-            color: #666;
+            color: var(--muted-text);
             font-size: 0.9em;
             margin-bottom: 20px;
         }
@@ -185,17 +228,17 @@
         #trending-table td {
             padding: 8px;
             text-align: left;
-            border-bottom: 1px solid #ddd;
+            border-bottom: 1px solid var(--border-color);
         }
         
         #trending-table th {
-            background-color: #f5f5f5;
+            background-color: var(--container-bg);
             font-weight: bold;
         }
         
         .track-button {
             padding: 4px 8px;
-            background: #4CAF50;
+            background: var(--button-bg);
             color: white;
             border: none;
             border-radius: 4px;
@@ -204,7 +247,42 @@
         }
         
         .track-button:hover {
-            background: #45a049;
+            background: var(--button-hover);
+        }
+
+        /* Add theme toggle button styles */
+        .theme-toggle {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            padding: 8px;
+            border-radius: 50%;
+            border: none;
+            background: var(--container-bg);
+            color: var(--text-color);
+            cursor: pointer;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 4px var(--shadow-color);
+        }
+
+        .theme-toggle:hover {
+            background: var(--button-hover);
+        }
+
+        .trending-explanation {
+            background: var(--container-bg);
+            border-radius: 8px;
+            text-align: center;
+            color: var(--muted-text);
+            line-height: 1.4;
+            padding: 12px;
+            margin: 0 0 20px 0;
+            box-sizing: border-box;
+            width: 100%;
         }
     </style>
 </head>
@@ -257,6 +335,11 @@
             <p><a href="https://github.com/josephredfern/bluehoover">Source</a> | <a href="https://bsky.app/profile/josephredfern.bsky.social">BlueSky</a></p>
         </div>
     </footer>
+
+    <!-- Add the theme toggle button to the body -->
+    <button class="theme-toggle" id="themeToggle" aria-label="Toggle dark mode">
+        🌓
+    </button>
 
     <script>
         let customWordChart = null;
@@ -479,6 +562,35 @@
 
         // Add event listener for mode changes
         document.getElementById('displayMode').addEventListener('change', updateCustomWordChart);
+
+        // Check for saved theme preference or default to light
+        const theme = localStorage.getItem('theme') || 'dark';
+        document.documentElement.setAttribute('data-theme', theme);
+
+        // Theme toggle handler
+        document.getElementById('themeToggle').addEventListener('click', () => {
+            const currentTheme = document.documentElement.getAttribute('data-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            
+            document.documentElement.setAttribute('data-theme', newTheme);
+            localStorage.setItem('theme', newTheme);
+            
+            // Update chart themes if they exist
+            if (customWordChart) {
+                customWordChart.options.scales.x.grid.color = newTheme === 'dark' ? '#404040' : '#ddd';
+                customWordChart.options.scales.y.grid.color = newTheme === 'dark' ? '#404040' : '#ddd';
+                customWordChart.options.scales.x.ticks.color = newTheme === 'dark' ? '#fff' : '#666';
+                customWordChart.options.scales.y.ticks.color = newTheme === 'dark' ? '#fff' : '#666';
+                customWordChart.update();
+            }
+            if (postsTimelineChart) {
+                postsTimelineChart.options.scales.x.grid.color = newTheme === 'dark' ? '#404040' : '#ddd';
+                postsTimelineChart.options.scales.y.grid.color = newTheme === 'dark' ? '#404040' : '#ddd';
+                postsTimelineChart.options.scales.x.ticks.color = newTheme === 'dark' ? '#fff' : '#666';
+                postsTimelineChart.options.scales.y.ticks.color = newTheme === 'dark' ? '#fff' : '#666';
+                postsTimelineChart.update();
+            }
+        });
     </script>
 </body>
 </html> 
