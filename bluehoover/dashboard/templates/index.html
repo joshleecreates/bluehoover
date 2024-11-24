@@ -212,7 +212,7 @@
     <h1>BlueHoover - BlueSky Firehose Analysis</h1>
     
     <div class="intro-container">
-        <p>This is a limited interface on top of a ClickHouse database connected to the BlueSky firehose. You can enter space-separated terms to track, and the chart will update to show the frequency of those terms over the last 24hrs.</p>
+        <p>Track how frequently terms appear in BlueSky posts over the last 24 hours. Enter space-separated words to monitor their usage. Switch between absolute counts and relative frequency (%) using the dropdown - relative mode shows each term's relative popularity within each 10-minute window.</p>
     </div>
     
     <div class="input-container">
@@ -221,7 +221,7 @@
             <option value="absolute">Absolute Frequency</option>
             <option value="relative">Relative Frequency (%)</option>
         </select>
-        <button onclick="updateCustomWordChart()">Track Words</button>
+        <button onclick="updateCustomWordChart()">Track Terms</button>
     </div>
 
     <div class="chart-container">

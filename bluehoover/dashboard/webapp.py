@@ -4,7 +4,6 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 import clickhouse_connect
-from collections import Counter
 import os
 from loguru import logger
 import re
@@ -46,34 +45,6 @@ async def root(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 
-class TimeRange(str, Enum):
-    HOUR_1 = "1h"
-    HOURS_6 = "6h"
-    HOURS_24 = "24h"
-    DAYS_7 = "7d"
-
-
-def get_time_range(range_str: TimeRange) -> tuple[datetime, datetime, str]:
-    end_time = datetime.now().replace(
-        second=0, microsecond=0
-    )  # Round to nearest minute
-
-    if range_str == TimeRange.HOUR_1:
-        start_time = end_time - timedelta(hours=1)
-        interval = "1 MINUTE"
-    elif range_str == TimeRange.HOURS_6:
-        start_time = end_time - timedelta(hours=6)
-        interval = "5 MINUTE"
-    elif range_str == TimeRange.HOURS_24:
-        start_time = end_time - timedelta(days=1)
-        interval = "10 MINUTE"
-    else:  # 7d
-        start_time = end_time - timedelta(days=7)
-        interval = "1 HOUR"
-
-    return start_time, end_time, interval
-
-
 @app.get("/api/posts_timeline")
 async def get_posts_timeline():
     client = get_clickhouse_client()
@@ -104,7 +75,6 @@ async def get_posts_timeline():
 
 class WordList(BaseModel):
     words: List[str]
-    timeRange: TimeRange = TimeRange.HOURS_24
 
 
 @app.post("/api/custom_word_timeline")
@@ -113,6 +83,8 @@ async def get_custom_word_timeline(word_list: WordList):
     sanitized_words = [
         word.lower().strip()[:100] for word in word_list.words if len(word.strip()) > 0
     ][:32]
+
+    logger.info(f"Processing request for {len(sanitized_words)} words: {sanitized_words}")
 
     if not sanitized_words:
         return {"error": "No valid words provided"}
