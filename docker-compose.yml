@@ -12,6 +12,7 @@ services:
       - CLICKHOUSE_USER=default
       - CLICKHOUSE_PASSWORD=
       - CLICKHOUSE_DB=default
+    restart: always
 
   firehose:
     build:
@@ -27,7 +28,7 @@ services:
       - clickhouse
     volumes:
       - ./cursor.txt:/app/cursor.txt
-    restart: unless-stopped
+    restart: always
 
   webapp:
     build:
@@ -55,5 +56,3 @@ services:
 
 volumes:
   clickhouse_data:
-  clickhouse_logs:
-  bluehoover_logs:
