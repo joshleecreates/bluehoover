@@ -1,7 +1,7 @@
 BlueHoover
 ==========
 
-BlueHoover is a tool for ingesting the BlueSky firehose and performing trend analysis. It is implemented using Asyncio Python, FastAPI, Clickhouse, and Chart.js. 
+BlueHoover is a tool for ingesting the BlueSky firehose and performing trend analysis. It is implemented using Asyncio Python, FastAPI, Clickhouse, and Chart.js. A live instance is accessible at [https://bluesky.joesstuff.co.uk](https://bluesky.joesstuff.co.uk). 
 
 It is still quite janky, and may be broken in strange an unexpected ways.
 
