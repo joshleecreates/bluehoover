@@ -347,13 +347,14 @@
         let customWordChart = null;
         let postsTimelineChart = null;
         
-        // Add these functions to handle base64 encoding/decoding
+        // Add these functions to handle base64 encoding/decoding with UTF-8 support
         function parseHashParams() {
             if (!window.location.hash) return {};
             try {
                 const hash = window.location.hash.substring(1);
                 const decoded = atob(hash);
-                const params = JSON.parse(decoded);
+                const text = decodeURIComponent(escape(decoded));
+                const params = JSON.parse(text);
                 return params;
             } catch (e) {
                 console.error('Error parsing hash:', e);
@@ -367,7 +368,8 @@
                     terms: document.getElementById('customWords').value,
                     mode: document.getElementById('displayMode').value
                 };
-                const encoded = btoa(JSON.stringify(params));
+                const str = JSON.stringify(params);
+                const encoded = btoa(unescape(encodeURIComponent(str)));
                 window.location.hash = encoded;
             }
         }
