@@ -124,39 +124,50 @@ async def get_custom_word_timeline(word_list: WordList):
     SELECT
         min(period) as start_period,
         token,
-        groupArray(count)
+        groupArray(count) as token_counts,
+        groupArray(total_posts) as total_posts
     FROM
     (
         SELECT
-        periods.period AS period,
-        wanted_tokens.token AS token,
-        COALESCE(fast_results.count, 0) AS count
-    FROM
-    (
-        SELECT toStartOfInterval(now() - toIntervalMinute(number * 10), toIntervalMinute(10)) AS period
-        FROM numbers(6 * 24)
-    ) AS periods
-    CROSS JOIN
-    (
-        SELECT arrayJoin(%(tokens)s) AS token
-    ) AS wanted_tokens
-    LEFT JOIN
-    (
-        SELECT
-            period,
-            token,
-            sum(count) AS count
-        FROM tokens_by_interval
-        WHERE (token IN %(tokens)s) AND (period >= toStartOfInterval(now() - toIntervalHour(24), toIntervalMinute(10)))
-        GROUP BY
-            period,
-            token
-    ) AS fast_results ON (periods.period = fast_results.period) AND (wanted_tokens.token = fast_results.token)
-    ORDER BY
-        periods.period ASC,
-        wanted_tokens.token ASC
-)
-        GROUP BY token
+            periods.period AS period,
+            wanted_tokens.token AS token,
+            COALESCE(fast_results.count, 0) AS count,
+            COALESCE(period_totals.total_posts, 0) as total_posts
+        FROM
+        (
+            SELECT toStartOfInterval(now() - toIntervalMinute(number * 10), toIntervalMinute(10)) AS period
+            FROM numbers(6 * 24)
+        ) AS periods
+        CROSS JOIN
+        (
+            SELECT arrayJoin(%(tokens)s) AS token
+        ) AS wanted_tokens
+        LEFT JOIN
+        (
+            SELECT
+                period,
+                token,
+                sum(count) AS count
+            FROM tokens_by_interval
+            WHERE (token IN %(tokens)s) AND (period >= toStartOfInterval(now() - toIntervalHour(24), toIntervalMinute(10)))
+            GROUP BY
+                period,
+                token
+        ) AS fast_results ON (periods.period = fast_results.period) AND (wanted_tokens.token = fast_results.token)
+        LEFT JOIN
+        (
+            SELECT 
+                period,
+                sum(count) as total_posts
+            FROM tokens_by_interval
+            WHERE period >= toStartOfInterval(now() - toIntervalHour(24), toIntervalMinute(10))
+            GROUP BY period
+        ) AS period_totals ON periods.period = period_totals.period
+        ORDER BY
+            periods.period ASC,
+            wanted_tokens.token ASC
+    )
+    GROUP BY token
     """
 
     result = client.query(query, parameters={"tokens": sanitized_words})
@@ -174,12 +185,25 @@ async def get_custom_word_timeline(word_list: WordList):
 
     datasets = []
     for word in sanitized_words:
-        # Find the matching row for this token
-        data = next(
-            (row[2] for row in result.result_rows if row[1] == word), [0] * (6 * 24)
-        )
-
-        datasets.append({"label": word, "data": data})
+        row = next((r for r in result.result_rows if r[1] == word), None)
+        if row:
+            token_counts = row[2]
+            total_posts = row[3]
+            relative_data = [
+                (count / total) * 100 if total > 0 else 0 
+                for count, total in zip(token_counts, total_posts)
+            ]
+            datasets.append({
+                "label": word,
+                "absolute": token_counts,
+                "relative": relative_data
+            })
+        else:
+            datasets.append({
+                "label": word,
+                "absolute": [0] * (6 * 24),
+                "relative": [0] * (6 * 24)
+            })
 
     return {"labels": time_labels, "datasets": datasets}
 

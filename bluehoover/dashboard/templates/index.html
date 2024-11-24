@@ -217,6 +217,10 @@
     
     <div class="input-container">
         <input type="text" id="customWords" placeholder="Enter words to track (space separated)" value="dogs cats raccoons squirrels badgers" onkeypress="handleKeyPress(event)">
+        <select id="displayMode">
+            <option value="absolute">Absolute Frequency</option>
+            <option value="relative">Relative Frequency (%)</option>
+        </select>
         <button onclick="updateCustomWordChart()">Track Words</button>
     </div>
 
@@ -289,7 +293,9 @@
                         labels: data.labels,
                         datasets: data.datasets.map(dataset => ({
                             label: dataset.label,
-                            data: dataset.data,
+                            data: document.getElementById('displayMode').value === 'relative' 
+                                ? dataset.relative 
+                                : dataset.absolute,
                             tension: 0.1,
                         }))
                     },
@@ -313,7 +319,9 @@
                                 beginAtZero: true,
                                 title: {
                                     display: true,
-                                    text: 'Frequency'
+                                    text: document.getElementById('displayMode').value === 'relative' 
+                                        ? 'Relative Frequency (%)' 
+                                        : 'Absolute Frequency'
                                 }
                             }
                         },
@@ -468,6 +476,9 @@
             updateCharts();
             updateTrending();
         });
+
+        // Add event listener for mode changes
+        document.getElementById('displayMode').addEventListener('change', updateCustomWordChart);
     </script>
 </body>
 </html> 
