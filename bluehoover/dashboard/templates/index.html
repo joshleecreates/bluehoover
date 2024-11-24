@@ -3,6 +3,7 @@
 <head>
     <title>BlueHoover Dashboard</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-crosshair"></script>
 
     <!-- Google tag (gtag.js) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-YVWQE8QN5N"></script>
@@ -309,7 +310,7 @@
     <!-- New trending section -->
     <div class="trending-container">
         <h2>Trending Topics</h2>
-        <p class="intro-container" style="width: 100%; margin: 0 0 20px 0; box-sizing: border-box;">
+        <p class="trending-explanation">
             Trending topics are identified by their "uplift" - how much more frequently they appear in the last hour compared to their average over the last 24 hours.
         </p>
         <p id="trending-time"></p>
@@ -415,11 +416,25 @@
                             },
                             legend: {
                                 position: 'bottom'
+                            },
+                            crosshair: {
+                                line: {
+                                    color: '#808080',
+                                    width: 1,
+                                    dashPattern: [5, 5]
+                                },
+                                sync: {
+                                    enabled: true,
+                                    group: 1,
+                                },
+                                zoom: {
+                                    enabled: false,
+                                }
                             }
                         },
                         interaction: {
                             mode: 'index',
-                            intersect: false
+                            intersect: false,
                         }
                     }
                 });
@@ -483,7 +498,25 @@
                             },
                             legend: {
                                 position: 'bottom'
+                            },
+                            crosshair: {
+                                line: {
+                                    color: '#808080',
+                                    width: 1,
+                                    dashPattern: [5, 5]
+                                },
+                                sync: {
+                                    enabled: true,
+                                    group: 1,
+                                },
+                                zoom: {
+                                    enabled: false,
+                                }
                             }
+                        },
+                        interaction: {
+                            mode: 'index',
+                            intersect: false,
                         }
                     }
                 });
