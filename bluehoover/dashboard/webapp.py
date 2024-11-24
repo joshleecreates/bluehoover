@@ -122,6 +122,7 @@ async def get_custom_word_timeline(word_list: WordList):
     # This query returns token and then an array of counts for each 10 minute period in the last 24 hours
     query = """
     SELECT
+        min(period) as start_period,
         token,
         groupArray(count)
     FROM
@@ -160,24 +161,27 @@ async def get_custom_word_timeline(word_list: WordList):
 
     result = client.query(query, parameters={"tokens": sanitized_words})
 
-    # Create time labels for last 24 hours in 10-minute intervals
-    now = datetime.now()
-    times = [
-        (now - timedelta(minutes=i * 10)).strftime("%H:%M") for i in range(6 * 24)
-    ][::-1]  # Reverse to get chronological order
+    if len(result.result_rows) == 0:
+        return {"error": "No results found"}
+
+    # row[0] is the start period, so use that instead of datetime.now().
+    start_period = result.result_rows[0][0]
+
+    time_labels = [
+        (start_period + timedelta(minutes=i * 10)).strftime("%H:%M")
+        for i in range(6 * 24)  # 6 * 24 = 1440 minutes in 24 hours
+    ]
 
     datasets = []
     for word in sanitized_words:
-        color = f'rgba({(hash(word) % 128 + 128)}, {(hash(word + "1") % 128 + 64)}, {(hash(word + "2") % 128 + 64)}, 0.8)'
-
         # Find the matching row for this token
         data = next(
-            (row[1] for row in result.result_rows if row[0] == word), [0] * (6 * 24)
+            (row[2] for row in result.result_rows if row[1] == word), [0] * (6 * 24)
         )
 
-        datasets.append({"label": word, "data": data, "color": color})
+        datasets.append({"label": word, "data": data})
 
-    return {"labels": times, "datasets": datasets}
+    return {"labels": time_labels, "datasets": datasets}
 
 
 @app.get("/api/trending")
