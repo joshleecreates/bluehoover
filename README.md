@@ -33,7 +33,7 @@ docker compose up -d
 
 # Notes
 
-Sequence number is written to `seq.txt` every 1000 events.
+Event timestamp is written to `cursor.txt` every 5 seconds (event time, not wall clock time). You may need to `touch` an empty cursor.txt before `docker compose up` to make the mount work properly.
 
 Use:
 ```sql
@@ -41,4 +41,3 @@ OPTIMIZE TABLE posts FINAL DEDUPLICATE BY cid,created_at
 ```
 
 to remove duplicates following dodgy replay...
-
