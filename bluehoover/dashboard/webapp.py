@@ -84,7 +84,9 @@ async def get_custom_word_timeline(word_list: WordList):
         word.lower().strip()[:100] for word in word_list.words if len(word.strip()) > 0
     ][:32]
 
-    logger.info(f"Processing request for {len(sanitized_words)} words: {sanitized_words}")
+    logger.info(
+        f"Processing request for {len(sanitized_words)} words: {sanitized_words}"
+    )
 
     if not sanitized_words:
         return {"error": "No valid words provided"}
@@ -162,20 +164,16 @@ async def get_custom_word_timeline(word_list: WordList):
             token_counts = row[2]
             total_posts = row[3]
             relative_data = [
-                (count / total) * 100 if total > 0 else 0 
+                (count / total) * 100 if total > 0 else 0
                 for count, total in zip(token_counts, total_posts)
             ]
-            datasets.append({
-                "label": word,
-                "absolute": token_counts,
-                "relative": relative_data
-            })
+            datasets.append(
+                {"label": word, "absolute": token_counts, "relative": relative_data}
+            )
         else:
-            datasets.append({
-                "label": word,
-                "absolute": [0] * (6 * 24),
-                "relative": [0] * (6 * 24)
-            })
+            datasets.append(
+                {"label": word, "absolute": [0] * (6 * 24), "relative": [0] * (6 * 24)}
+            )
 
     return {"labels": time_labels, "datasets": datasets}
 

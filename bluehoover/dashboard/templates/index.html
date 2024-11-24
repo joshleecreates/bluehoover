@@ -343,9 +343,36 @@
     </button>
 
     <script>
+        const default_terms = "dogs cats raccoons squirrels badgers";
         let customWordChart = null;
         let postsTimelineChart = null;
         
+        // Add these functions to handle base64 encoding/decoding
+        function parseHashParams() {
+            if (!window.location.hash) return {};
+            try {
+                const hash = window.location.hash.substring(1);
+                const decoded = atob(hash);
+                const params = JSON.parse(decoded);
+                return params;
+            } catch (e) {
+                console.error('Error parsing hash:', e);
+                return {};
+            }
+        }
+
+        function updateHash() {
+            if (document.getElementById('customWords').value !== default_terms) {
+                const params = {
+                    terms: document.getElementById('customWords').value,
+                    mode: document.getElementById('displayMode').value
+                };
+                const encoded = btoa(JSON.stringify(params));
+                window.location.hash = encoded;
+            }
+        }
+
+        // Modify the updateCustomWordChart function to update hash
         async function updateCustomWordChart() {
             const wordsInput = document.getElementById('customWords').value;
             const words = wordsInput.split(' ')
@@ -355,6 +382,9 @@
                 alert('Please enter at least one word to track');
                 return;
             }
+            
+            // Update hash when chart updates
+            updateHash();
             
             try {
                 const response = await fetch('/api/custom_word_timeline', {
@@ -558,7 +588,7 @@
                         const currentWords = input.value.trim().split(' ').filter(w => w.length > 0);
                         
                         // If this is the first tracked word, replace the default words
-                        if (currentWords.join(' ') === "dogs cats raccoons squirrels badgers") {
+                        if (currentWords.join(' ') === default_terms) {
                             input.value = trend.token;
                         } else {
                             // Only add if not already being tracked
@@ -586,15 +616,24 @@
             }
         }
 
-        // Initial load
+        // Add event listener for mode changes to update hash
+        document.getElementById('displayMode').addEventListener('change', () => {
+            updateCustomWordChart();
+        });
+
+        // Modify the initial load to check for hash parameters
         document.addEventListener('DOMContentLoaded', function() {
+            const params = parseHashParams();
+            if (params.terms) {
+                document.getElementById('customWords').value = params.terms;
+            }
+            if (params.mode) {
+                document.getElementById('displayMode').value = params.mode;
+            }
             updateCustomWordChart();
             updateCharts();
             updateTrending();
         });
-
-        // Add event listener for mode changes
-        document.getElementById('displayMode').addEventListener('change', updateCustomWordChart);
 
         // Check for saved theme preference or default to light
         const theme = localStorage.getItem('theme') || 'dark';
