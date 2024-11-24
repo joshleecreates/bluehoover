@@ -112,7 +112,7 @@ async def get_custom_word_timeline(word_list: WordList):
     # Sanitize input words
     sanitized_words = [
         word.lower().strip()[:100] for word in word_list.words if len(word.strip()) > 0
-    ][:10]
+    ][:32]
 
     if not sanitized_words:
         return {"error": "No valid words provided"}
