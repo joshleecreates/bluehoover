@@ -1,11 +1,14 @@
 services:
   clickhouse:
-    image: clickhouse/clickhouse-server
+    image: clickhouse/clickhouse-server:latest
     ports:
       - "8123:8123"
       - "9000:9000"
     volumes:
       - clickhouse_data:/var/lib/clickhouse
+      - ./config/config.d:/etc/clickhouse-server/config.d
+      - ./config/users.d:/etc/clickhouse-server/users.d
+      - ./logs:/var/log/clickhouse-server
     environment:
       - CLICKHOUSE_DATABASE=${CLICKHOUSE_DATABASE}
       - CLICKHOUSE_USER=${CLICKHOUSE_USER}
@@ -28,6 +31,14 @@ services:
     volumes:
       - ./cursor.txt:/app/cursor.txt
     restart: unless-stopped
+
+  keeper:
+    image: clickhouse/clickhouse-keeper:latest
+    ports:
+      - "9181:9181"
+      - "9444:9444"
+    volumes:
+      - ./config/keeper.d:/etc/clickhouse-keeper
 
   webapp:
     image: ${IMAGE_NAME}:${APP_VERSION}-webapp

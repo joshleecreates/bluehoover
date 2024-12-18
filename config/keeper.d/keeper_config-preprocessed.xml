@@ -1,0 +1,30 @@
+<!-- This file was generated automatically.
+     Do not edit it: it is likely to be discarded and generated again before it's read next time.
+     Files used to generate this file:
+       /etc/clickhouse-keeper/keeper_config.xml      -->
+
+<clickhouse>
+    <logger>
+        <level>debug</level>
+                <log>/var/log/clickhouse-keeper/clickhouse-keeper.log</log>
+                <errorlog>/var/log/clickhouse-keeper/clickhouse-keeper.err.log</errorlog>
+                <size>100M</size>
+                <count>5</count>
+        <console>true</console>
+    </logger>
+    <listen_host>0.0.0.0</listen_host>
+    <keeper_server>
+        <tcp_port>9181</tcp_port>
+        <server_id>1</server_id>
+        <max_memory_usage_soft_limit>1000000000</max_memory_usage_soft_limit> <!--1GB -->
+        <!-- <max_memory_usage_soft_limit_ratio>0.125</max_memory_usage_soft_limit_ratio> -->
+        <storage_path>/var/lib/clickhouse-keeper</storage_path>
+        <raft_configuration>
+            <server>
+                <id>1</id>
+                <hostname>keeper-sa</hostname>
+                <port>9234</port>
+            </server>
+        </raft_configuration>
+    </keeper_server>
+</clickhouse>

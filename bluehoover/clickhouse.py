@@ -67,12 +67,26 @@ class JetstreamHoover:
 
         logger.info("Shutdown complete")
 
-    def get_checkpoint(self) -> int | None:
+    async def get_checkpoint(self) -> int | None:
         try:
-            with open(CURSOR_FILENAME, "r") as f:
-                return int(f.read())
-        except (FileNotFoundError, ValueError, TypeError, OSError):
+            client = await ClickHouseManager().get_client()
+            result = client.query("SELECT * FROM cursor")
+            if result.result_rows:
+                return int(result.first_row[0])
             return None
+        except (ClickHouseError, ValueError, TypeError) as e:
+            logger.error(f"Error reading checkpoint: {e}")
+            return None
+
+    async def save_checkpoint(self, cursor: int) -> None:
+        try:
+            client = await ClickHouseManager().get_client()
+            # Convert cursor to string and write to file table
+            client.query(
+                f"INSERT INTO TABLE cursor VALUES ({cursor})",
+            )
+        except ClickHouseError as e:
+            logger.error(f"Error saving checkpoint: {e}")
 
     async def start(self):
         try:
@@ -281,8 +295,7 @@ class JetstreamHoover:
 
         if self.cursor is None or time_us > self.cursor + 5_000_000:
             logger.info(f"Writing checkpoint at {time_us}")
-            with open(CURSOR_FILENAME, "w") as f:
-                f.write(str(time_us))
+            self.save_checkpoint(cursor)
             self.cursor = time_us
 
         # logger.info(f"Enqueued post: {record[1]}")
@@ -433,11 +446,19 @@ ORDER BY `1hr_count` / `24hr_avg` DESC
 LIMIT 100
 """
 
+
+
+
+            create_cursor_table_query = """
+                CREATE TABLE IF NOT EXISTS cursor(`cursor` UInt32 ) ENGINE = KeeperMap('/keeper_map_tables') PRIMARY KEY cursor
+            """
+
             await self.client.command(create_posts_table_query)
             await self.client.command(create_tokens_by_interval_table_query)
             await self.client.command(create_tokenizer_query)
             await self.client.command(create_trends_1hr_table_query)
             await self.client.command(create_trends_24hr_table_query)
+            await self.client.command(create_cursor_table_query)
 
             logger.info("Connected to ClickHouse and verified tables/MVs exists")
         except Exception as e:
