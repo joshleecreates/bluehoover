@@ -56,3 +56,5 @@ bluehoover_logs/
 clickhouse_data/
 clickhouse_logs/ 
 clickhouse-data/
+logs/
+docker/keeper.d/keeper_config-preprocessed.xml

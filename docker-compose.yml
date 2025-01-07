@@ -6,16 +6,15 @@ services:
       - "9000:9000"
     volumes:
       - clickhouse_data:/var/lib/clickhouse
-      - ./config/config.d:/etc/clickhouse-server/config.d
-      - ./config/users.d:/etc/clickhouse-server/users.d
-      - ./logs:/var/log/clickhouse-server
+      - ./docker/config.d:/etc/clickhouse-server/config.d
+      - ./clickhouse_logs:/var/log/clickhouse-server
     environment:
       - CLICKHOUSE_DATABASE=${CLICKHOUSE_DATABASE}
       - CLICKHOUSE_USER=${CLICKHOUSE_USER}
       - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
-    restart: unless-stopped
     depends_on:
       - keeper
+    restart: unless-stopped
 
   firehose:
     image: ${IMAGE_NAME}:${APP_VERSION}-firehose
@@ -41,7 +40,9 @@ services:
       - "9181:9181"
       - "9444:9444"
     volumes:
-      - ./config/keeper.d:/etc/clickhouse-keeper
+      - keeper_data:/var/lib/clickhouse 
+      - ./docker/keeper.d:/etc/clickhouse-keeper
+    restart: unless-stopped
 
   webapp:
     image: ${IMAGE_NAME}:${APP_VERSION}-webapp
@@ -69,4 +70,5 @@ services:
     restart: unless-stopped
 
 volumes:
+  keeper_data:
   clickhouse_data:
