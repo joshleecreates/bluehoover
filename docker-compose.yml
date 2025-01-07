@@ -14,6 +14,8 @@ services:
       - CLICKHOUSE_USER=${CLICKHOUSE_USER}
       - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
     restart: unless-stopped
+    depends_on:
+      - keeper
 
   firehose:
     image: ${IMAGE_NAME}:${APP_VERSION}-firehose
@@ -21,6 +23,7 @@ services:
       context: .
       dockerfile: Dockerfile
     environment:
+      - PYTHONASYNCIODEBUG=1
       - CLICKHOUSE_HOST=${CLICKHOUSE_HOST}
       - CLICKHOUSE_PORT=${CLICKHOUSE_PORT}
       - CLICKHOUSE_DATABASE=${CLICKHOUSE_DATABASE}

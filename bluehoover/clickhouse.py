@@ -31,7 +31,7 @@ class JetstreamHoover:
         self.post_queue = asyncio.Queue()
         self.batch_size = batch_size
         self.timeout = timeout
-        self.cursor = self.get_checkpoint()
+        self.cursor = 0
         self.websocket_task = None
         self.running = True
 
@@ -68,34 +68,46 @@ class JetstreamHoover:
         logger.info("Shutdown complete")
 
     async def get_checkpoint(self) -> int | None:
+        if self.cursor != 0:
+            return self.cursor
         try:
             client = await ClickHouseManager().get_client()
-            result = client.query("SELECT * FROM cursor")
-            if result.result_rows:
-                return int(result.first_row[0])
-            return None
+            result = await client.query("SELECT max(cursor) FROM cursor")
+            return int(result.first_row[0])
         except (ClickHouseError, ValueError, TypeError) as e:
             logger.error(f"Error reading checkpoint: {e}")
             return None
 
     async def save_checkpoint(self, cursor: int) -> None:
+        logger.info("saving checkpoint")
+        self.cursor = cursor
         try:
             client = await ClickHouseManager().get_client()
             # Convert cursor to string and write to file table
-            client.query(
-                f"INSERT INTO TABLE cursor VALUES ({cursor})",
-            )
-        except ClickHouseError as e:
-            logger.error(f"Error saving checkpoint: {e}")
+            theQuery = f"INSERT INTO TABLE cursor VALUES ({cursor})"
+            # await client.insert(
+            #     "cursor", 
+            #     [(cursor,)],
+            #     columns=[ "cursor" ]
+            # )
+            await client.command(theQuery)
+            logger.info(f"inserted: {cursor}")
+        except Exception as e:
+            logger.error(f"Error saving checkpoint: {e}", exc_info=true)
 
     async def start(self):
         try:
+            logger.info("Creating websocket task")
             self.websocket_task = asyncio.create_task(self.slurp_websocket())
+            logger.info("Creating process task")
             self.process_task = asyncio.create_task(self.process_queue())
 
+            logger.info("Gathering")
             await asyncio.gather(
                 self.websocket_task, self.process_task, return_exceptions=True
             )
+        except Exception as e:
+            logger.error("Something went wrong", exc_info=True)
         finally:
             if self.websocket_task and not self.websocket_task.done():
                 self.websocket_task.cancel()
@@ -164,8 +176,10 @@ class JetstreamHoover:
     )
     async def slurp_websocket(self):
         url = self.url + "?wantedCollections=app.bsky.feed.post&compression=True"
-        if self.cursor:
-            url += f"&cursor={self.cursor}"
+        if (cursor := await self.get_checkpoint()):
+            url += f"&cursor={cursor}"
+
+        logger.info(f"Connecting to {url}")
 
         try:
             async for ws in connect(url):
@@ -293,12 +307,10 @@ class JetstreamHoover:
 
         time_us = message.get("time_us", 0)
 
-        if self.cursor is None or time_us > self.cursor + 5_000_000:
+        if not (cursor := await self.get_checkpoint()) or time_us > cursor + 5_000_000:
             logger.info(f"Writing checkpoint at {time_us}")
-            self.save_checkpoint(cursor)
-            self.cursor = time_us
+            await self.save_checkpoint(time_us)
 
-        # logger.info(f"Enqueued post: {record[1]}")
 
     async def insert_batch(self, client: Client, batch: list[tuple]) -> None:
         """
@@ -450,7 +462,7 @@ LIMIT 100
 
 
             create_cursor_table_query = """
-                CREATE TABLE IF NOT EXISTS cursor(`cursor` UInt32 ) ENGINE = KeeperMap('/keeper_map_tables') PRIMARY KEY cursor
+                CREATE TABLE IF NOT EXISTS cursor(`cursor` UInt64 ) ENGINE = KeeperMap('/keeper_map_tables') PRIMARY KEY cursor
             """
 
             await self.client.command(create_posts_table_query)
@@ -501,9 +513,11 @@ if __name__ == "__main__":
 
     # Create event loop explicitly
     loop = asyncio.new_event_loop()
+    logger.info("504")
     asyncio.set_event_loop(loop)
-
+    logger.info("event looping")
     hoover = JetstreamHoover()
+    logger.info("hoovering") 
 
     try:
         loop.run_until_complete(hoover.start())

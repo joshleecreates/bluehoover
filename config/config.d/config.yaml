@@ -1,5 +1,6 @@
 zookeeper:
   node:
-    host: host.docker.internal
+    host: keeper
     port: 9181
 keeper_map_path_prefix: "/keeper_map_tables"
+listen_host: "0.0.0.0"

@@ -17,7 +17,7 @@ COPY pyproject.toml poetry.lock ./
 
 # Install dependencies
 RUN poetry config virtualenvs.create false \
-    && poetry install --no-dev --no-interaction --no-ansi
+    && poetry install --without dev --no-interaction --no-ansi
 
 # Copy source code
 COPY bluehoover ./bluehoover
