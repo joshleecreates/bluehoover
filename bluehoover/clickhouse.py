@@ -34,6 +34,7 @@ class JetstreamHoover:
         self.cursor = 0
         self.websocket_task = None
         self.running = True
+        self.clickhouse = ClickHouseManager()
 
         signal.signal(
             signal.SIGINT, lambda _, __: asyncio.create_task(self.signal_handler())
@@ -71,7 +72,7 @@ class JetstreamHoover:
         if self.cursor != 0:
             return self.cursor
         try:
-            client = await ClickHouseManager().get_client()
+            client = await self.clickhouse.get_client()
             result = await client.query("SELECT max(cursor) FROM cursor")
             return int(result.first_row[0])
         except (ClickHouseError, ValueError, TypeError) as e:
@@ -82,14 +83,8 @@ class JetstreamHoover:
         logger.info("saving checkpoint")
         self.cursor = cursor
         try:
-            client = await ClickHouseManager().get_client()
-            # Convert cursor to string and write to file table
+            client = await self.clickhouse.get_client()
             theQuery = f"INSERT INTO TABLE cursor VALUES ({cursor})"
-            # await client.insert(
-            #     "cursor", 
-            #     [(cursor,)],
-            #     columns=[ "cursor" ]
-            # )
             await client.command(theQuery)
             logger.info(f"inserted: {cursor}")
         except Exception as e:
@@ -123,7 +118,7 @@ class JetstreamHoover:
                     pass
 
     async def process_queue(self):
-        clickhouse = ClickHouseManager()
+        clickhouse = self.clickhouse
         batch = []
         last_insert = time.monotonic()
 
