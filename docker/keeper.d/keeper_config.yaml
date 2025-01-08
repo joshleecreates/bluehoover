@@ -1,0 +1,27 @@
+logger:
+    level: debug
+    log: /var/log/clickhouse-server/clickhouse-keeper.log
+    errorlog: /var/log/clickhouse-server/clickhouse-keeper.err.log
+    size: 100M
+    count: 5
+    console: true
+listen_host: '0.0.0.0'
+keeper_server:
+    tcp_port: 9181
+    server_id: 1
+    storage_path: /var/lib/clickhouse/keeper
+    max_memory_usage_soft_limit: 1073741824
+    enable_reconfiguration: true
+    four_letter_word_white_list: '*'
+    # to check the status of the keeper curl 'http://localhost:9182/ready' | jq
+    http_control:
+      port: 9182
+      readiness:
+        endpoint: /ready
+    coordination_settings:
+      raft_logs_level: information
+    raft_configuration:
+        server:
+            id: 1
+            hostname: keeper-sa
+            port: 9234
