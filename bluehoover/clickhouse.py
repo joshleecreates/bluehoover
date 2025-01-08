@@ -18,7 +18,7 @@ from loguru import logger
 
 CURSOR_FILENAME = Path(__file__).parent.parent / "cursor.txt"
 MAX_RETRIES = 10
-
+CHECKPOINT_METHOD = os.getenv("CHECKPOINT_METHOD", "Filesystem")
 
 class JetstreamHoover:
     def __init__(
@@ -35,9 +35,12 @@ class JetstreamHoover:
         self.websocket_task = None
         self.running = True
         self.clickhouse = ClickHouseManager()
-        self.checkpoint = KeepermapUpdatingCheckpoint()
-        # self.checkpoint = KeepermapDeletingCheckpoint()
-        # self.checkpoint = FilesystemCheckpoint()
+        if "KeepermapUpdating" == CHECKPOINT_METHOD:
+            self.checkpoint = KeepermapUpdatingCheckpoint()
+        elif "KeepermapDeleting" == CHECKPOINT_METHOD:
+            self.checkpoint = KeepermapDeletingCheckpoint()
+        else:
+            self.checkpoint = FilesystemCheckpoint()
 
         signal.signal(
             signal.SIGINT, lambda _, __: asyncio.create_task(self.signal_handler())
