@@ -35,8 +35,8 @@ class JetstreamHoover:
         self.websocket_task = None
         self.running = True
         self.clickhouse = ClickHouseManager()
-        # self.checkpoint = KeepermapDeletingCheckpoint()
-        self.checkpoint = FilesystemCheckpoint()
+        self.checkpoint = KeepermapDeletingCheckpoint()
+        # self.checkpoint = FilesystemCheckpoint()
 
         signal.signal(
             signal.SIGINT, lambda _, __: asyncio.create_task(self.signal_handler())
@@ -434,11 +434,8 @@ ORDER BY `1hr_count` / `24hr_avg` DESC
 LIMIT 100
 """
 
-
-
-
             create_cursor_table_query = """
-                CREATE TABLE IF NOT EXISTS cursor(`cursor` UInt64 ) ENGINE = KeeperMap('/keeper_map_tables') PRIMARY KEY cursor
+                CREATE TABLE IF NOT EXISTS cursor(`key` String, `cursor` UInt64 ) ENGINE = KeeperMap('/keeper_map_tables') PRIMARY KEY key
             """
 
             await self.client.command(create_posts_table_query)
@@ -511,7 +508,7 @@ class KeepermapDeletingCheckpoint:
     async def save_checkpoint(self, cursor: int) -> None:
         try:
             client = await self.clickhouse.get_client()
-            insertQuery = f"INSERT INTO TABLE cursor VALUES ({cursor})"
+            insertQuery = f"INSERT INTO TABLE cursor VALUES ('cursor', {cursor})"
             deleteQuery = f"DELETE FROM cursor WHERE cursor < {cursor}"
             await client.command(insertQuery)
             await client.command(deleteQuery)

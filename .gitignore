@@ -52,6 +52,7 @@ log/
 Thumbs.db
 
 # Project specific
+cursor.txt
 bluehoover_logs/
 clickhouse_data/
 clickhouse_logs/ 
