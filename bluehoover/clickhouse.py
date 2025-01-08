@@ -506,18 +506,18 @@ class KeepermapDeletingCheckpoint:
             result = await client.query("SELECT max(cursor) FROM cursor")
             return int(result.first_row[0])
         except (ClickHouseError, ValueError, TypeError) as e:
-            logger.error(f"Error reading checkpoint: {e}", exc_info=true)
+            logger.error(f"Error reading checkpoint: {e}", exc_info=True)
             return None
 
     async def save_checkpoint(self, cursor: int) -> None:
         try:
             client = await self.clickhouse.get_client()
-            insertQuery = f"INSERT INTO TABLE cursor VALUES ({cursor}, {cursor})"
-            deleteQuery = f"DELETE FROM cursor WHERE cursor < {cursor}"
-            await client.command(insertQuery)
-            await client.command(deleteQuery)
+            insert_query = f"INSERT INTO TABLE cursor VALUES ({cursor}, {cursor})"
+            delete_query = f"DELETE FROM cursor WHERE cursor < {cursor}"
+            await client.command(insert_query)
+            await client.command(delete_query)
         except Exception as e:
-            logger.error(f"Error saving checkpoint: {e}", exc_info=true)
+            logger.error(f"Error saving checkpoint: {e}", exc_info=True)
 
 class KeepermapUpdatingCheckpoint:
     def __init__(self):
@@ -526,19 +526,23 @@ class KeepermapUpdatingCheckpoint:
     async def get_checkpoint(self) -> int | None:
         try:
             client = await self.clickhouse.get_client()
-            result = await client.query("SELECT max(cursor) FROM cursor")
+            result = await client.query("SELECT cursor FROM cursor")
             return int(result.first_row[0])
         except (ClickHouseError, ValueError, TypeError) as e:
-            logger.error(f"Error reading checkpoint: {e}", exc_info=true)
+            logger.error(f"Error reading checkpoint: {e}", exc_info=True)
             return None
-
+    """
+    This save_checkpoint will not work if the cursor already exist in the table
+    """
     async def save_checkpoint(self, cursor: int) -> None:
         try:
             client = await self.clickhouse.get_client()
-            insertQuery = f"INSERT INTO TABLE cursor VALUES ('cursor', {cursor})"
-            await client.command(insertQuery)
+            insert_query = f"INSERT INTO TABLE cursor VALUES ('cursor', {cursor})"
+            update_query = f"ALTER TABLE cursor UPDATE cursor = {cursor} WHERE key = 'cursor'"
+            await client.command(insert_query)
+            await client.command(update_query)
         except Exception as e:
-            logger.error(f"Error saving checkpoint: {e}", exc_info=true)
+            logger.error(f"Error saving checkpoint: {e}", exc_info=True)
 
 if __name__ == "__main__":
     logger.info("Starting JetstreamHoover...")
