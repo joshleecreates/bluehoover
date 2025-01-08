@@ -545,11 +545,9 @@ if __name__ == "__main__":
 
     # Create event loop explicitly
     loop = asyncio.new_event_loop()
-    logger.info("504")
     asyncio.set_event_loop(loop)
-    logger.info("event looping")
     hoover = JetstreamHoover()
-    logger.info("hoovering") 
+    logger.info("Hoovering!") 
 
     try:
         loop.run_until_complete(hoover.start())
