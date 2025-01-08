@@ -35,7 +35,8 @@ class JetstreamHoover:
         self.websocket_task = None
         self.running = True
         self.clickhouse = ClickHouseManager()
-        self.checkpoint = KeepermapDeletingCheckpoint()
+        self.checkpoint = KeepermapUpdatingCheckpoint()
+        # self.checkpoint = KeepermapDeletingCheckpoint()
         # self.checkpoint = FilesystemCheckpoint()
 
         signal.signal(
@@ -508,10 +509,31 @@ class KeepermapDeletingCheckpoint:
     async def save_checkpoint(self, cursor: int) -> None:
         try:
             client = await self.clickhouse.get_client()
-            insertQuery = f"INSERT INTO TABLE cursor VALUES ('cursor', {cursor})"
+            insertQuery = f"INSERT INTO TABLE cursor VALUES ({cursor}, {cursor})"
             deleteQuery = f"DELETE FROM cursor WHERE cursor < {cursor}"
             await client.command(insertQuery)
             await client.command(deleteQuery)
+        except Exception as e:
+            logger.error(f"Error saving checkpoint: {e}", exc_info=true)
+
+class KeepermapUpdatingCheckpoint:
+    def __init__(self):
+        self.clickhouse = ClickHouseManager()
+
+    async def get_checkpoint(self) -> int | None:
+        try:
+            client = await self.clickhouse.get_client()
+            result = await client.query("SELECT max(cursor) FROM cursor")
+            return int(result.first_row[0])
+        except (ClickHouseError, ValueError, TypeError) as e:
+            logger.error(f"Error reading checkpoint: {e}", exc_info=true)
+            return None
+
+    async def save_checkpoint(self, cursor: int) -> None:
+        try:
+            client = await self.clickhouse.get_client()
+            insertQuery = f"INSERT INTO TABLE cursor VALUES ('cursor', {cursor})"
+            await client.command(insertQuery)
         except Exception as e:
             logger.error(f"Error saving checkpoint: {e}", exc_info=true)
 
