@@ -9,7 +9,7 @@ listen_host: '0.0.0.0'
 keeper_server:
     tcp_port: 9181
     server_id: 1
-    storage_path: /var/lib/clickhouse/keeper
+    storage_path: /var/lib/clickhouse-keeper
     max_memory_usage_soft_limit: 1073741824
     enable_reconfiguration: true
     four_letter_word_white_list: '*'
