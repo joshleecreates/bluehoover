@@ -31,10 +31,12 @@ class JetstreamHoover:
         self.post_queue = asyncio.Queue()
         self.batch_size = batch_size
         self.timeout = timeout
-        self.cursor = 0
+        self.cursor = None
         self.websocket_task = None
         self.running = True
         self.clickhouse = ClickHouseManager()
+        # self.checkpoint = KeepermapDeletingCheckpoint()
+        self.checkpoint = FilesystemCheckpoint()
 
         signal.signal(
             signal.SIGINT, lambda _, __: asyncio.create_task(self.signal_handler())
@@ -67,28 +69,6 @@ class JetstreamHoover:
             await asyncio.gather(*tasks_to_cancel, return_exceptions=True)
 
         logger.info("Shutdown complete")
-
-    async def get_checkpoint(self) -> int | None:
-        if self.cursor != 0:
-            return self.cursor
-        try:
-            client = await self.clickhouse.get_client()
-            result = await client.query("SELECT max(cursor) FROM cursor")
-            return int(result.first_row[0])
-        except (ClickHouseError, ValueError, TypeError) as e:
-            logger.error(f"Error reading checkpoint: {e}")
-            return None
-
-    async def save_checkpoint(self, cursor: int) -> None:
-        logger.info("saving checkpoint")
-        self.cursor = cursor
-        try:
-            client = await self.clickhouse.get_client()
-            theQuery = f"INSERT INTO TABLE cursor VALUES ({cursor})"
-            await client.command(theQuery)
-            logger.info(f"inserted: {cursor}")
-        except Exception as e:
-            logger.error(f"Error saving checkpoint: {e}", exc_info=true)
 
     async def start(self):
         try:
@@ -171,7 +151,7 @@ class JetstreamHoover:
     )
     async def slurp_websocket(self):
         url = self.url + "?wantedCollections=app.bsky.feed.post&compression=True"
-        if (cursor := await self.get_checkpoint()):
+        if (cursor := await self.checkpoint.get_checkpoint()):
             url += f"&cursor={cursor}"
 
         logger.info(f"Connecting to {url}")
@@ -302,9 +282,10 @@ class JetstreamHoover:
 
         time_us = message.get("time_us", 0)
 
-        if not (cursor := await self.get_checkpoint()) or time_us > cursor + 5_000_000:
+        if not self.cursor or (time_us > self.cursor + 5_000_000):
             logger.info(f"Writing checkpoint at {time_us}")
-            await self.save_checkpoint(time_us)
+            await self.checkpoint.save_checkpoint(time_us)
+            self.cursor=time_us
 
 
     async def insert_batch(self, client: Client, batch: list[tuple]) -> None:
@@ -502,6 +483,40 @@ LIMIT 100
             self.client = None  # Force reconnect on next attempt
             raise
 
+class FilesystemCheckpoint:
+    async def get_checkpoint(self) -> int | None:
+        try:
+            with open(CURSOR_FILENAME, "r") as f:
+                return int(f.read())
+        except (FileNotFoundError, ValueError, TypeError, OSError):
+            return None
+
+    async def save_checkpoint(self, cursor: int) -> None:
+        with open(CURSOR_FILENAME, "w") as f:
+            f.write(str(cursor))
+
+class KeepermapDeletingCheckpoint:
+    def __init__(self):
+        self.clickhouse = ClickHouseManager()
+
+    async def get_checkpoint(self) -> int | None:
+        try:
+            client = await self.clickhouse.get_client()
+            result = await client.query("SELECT max(cursor) FROM cursor")
+            return int(result.first_row[0])
+        except (ClickHouseError, ValueError, TypeError) as e:
+            logger.error(f"Error reading checkpoint: {e}", exc_info=true)
+            return None
+
+    async def save_checkpoint(self, cursor: int) -> None:
+        try:
+            client = await self.clickhouse.get_client()
+            insertQuery = f"INSERT INTO TABLE cursor VALUES ({cursor})"
+            deleteQuery = f"DELETE FROM cursor WHERE cursor < {cursor}"
+            await client.command(insertQuery)
+            await client.command(deleteQuery)
+        except Exception as e:
+            logger.error(f"Error saving checkpoint: {e}", exc_info=true)
 
 if __name__ == "__main__":
     logger.info("Starting JetstreamHoover...")
