@@ -17,7 +17,7 @@ services:
     restart: unless-stopped
 
   firehose:
-    image: ${IMAGE_NAME}:${APP_VERSION}-firehose
+    image: ${IMAGE_NAME}-firehose:${APP_VERSION}
     build:
       context: .
       dockerfile: Dockerfile
@@ -44,7 +44,7 @@ services:
     restart: unless-stopped
 
   webapp:
-    image: ${IMAGE_NAME}:${APP_VERSION}-webapp
+    image: ${IMAGE_NAME}-webapp:${APP_VERSION}
     build:
       context: .
       dockerfile: webapp.Dockerfile
