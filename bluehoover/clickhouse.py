@@ -19,6 +19,8 @@ from loguru import logger
 CURSOR_FILENAME = Path(__file__).parent.parent / "cursor.txt"
 MAX_RETRIES = 10
 CHECKPOINT_METHOD = os.getenv("CHECKPOINT_METHOD", "Filesystem")
+CURSOR_REFRESH_MS = 5_000_000
+
 
 class JetstreamHoover:
     def __init__(
@@ -76,12 +78,8 @@ class JetstreamHoover:
 
     async def start(self):
         try:
-            logger.info("Creating websocket task")
             self.websocket_task = asyncio.create_task(self.slurp_websocket())
-            logger.info("Creating process task")
             self.process_task = asyncio.create_task(self.process_queue())
-
-            logger.info("Gathering")
             await asyncio.gather(
                 self.websocket_task, self.process_task, return_exceptions=True
             )
@@ -102,7 +100,6 @@ class JetstreamHoover:
                     pass
 
     async def process_queue(self):
-        clickhouse = self.clickhouse
         batch = []
         last_insert = time.monotonic()
 
@@ -121,7 +118,7 @@ class JetstreamHoover:
                         f"Triggering insert of {len(batch)} records, last insert {time.monotonic() - last_insert:.2f}s ago"
                     )
 
-                    client = await clickhouse.get_client()
+                    client = await self.clickhouse.get_client()
                     await self.insert_batch(client, batch)
 
                     last_insert = time.monotonic()
@@ -132,7 +129,7 @@ class JetstreamHoover:
                         f"Queue timeout reached - writing batch of {len(batch)} records on time grounds"
                     )
 
-                    client = await clickhouse.get_client()
+                    client = await self.clickhouse.get_client()
                     await self.insert_batch(client, batch)
 
                     last_insert = time.monotonic()
@@ -141,7 +138,7 @@ class JetstreamHoover:
                 logger.info("Process queue cancelled")
                 if batch:
                     try:
-                        client = await clickhouse.get_client()
+                        client = await self.clickhouse.get_client()
                         await self.insert_batch(client, batch)
                     except Exception as e:
                         logger.error(f"Error processing final batch: {e}")
@@ -155,7 +152,7 @@ class JetstreamHoover:
     )
     async def slurp_websocket(self):
         url = self.url + "?wantedCollections=app.bsky.feed.post&compression=True"
-        if (cursor := await self.checkpoint.get_checkpoint()):
+        if cursor := await self.checkpoint.get_checkpoint():
             url += f"&cursor={cursor}"
 
         logger.info(f"Connecting to {url}")
@@ -286,11 +283,10 @@ class JetstreamHoover:
 
         time_us = message.get("time_us", 0)
 
-        if not self.cursor or (time_us > self.cursor + 5_000_000):
+        if not self.cursor or (time_us > self.cursor + CURSOR_REFRESH_MS):
             logger.info(f"Writing checkpoint at {time_us}")
             await self.checkpoint.save_checkpoint(time_us)
-            self.cursor=time_us
-
+            self.cursor = time_us
 
     async def insert_batch(self, client: Client, batch: list[tuple]) -> None:
         """
@@ -439,7 +435,7 @@ LIMIT 100
 """
 
             create_cursor_table_query = """
-                CREATE TABLE IF NOT EXISTS cursor(`key` String, `cursor` UInt64 ) ENGINE = KeeperMap('/keeper_map_tables') PRIMARY KEY key
+                CREATE TABLE IF NOT EXISTS bluehoover_parameters(`key` String, `uint64_value` UInt64 ) ENGINE = KeeperMap('/keeper_map_tables') PRIMARY KEY key
             """
 
             await self.client.command(create_posts_table_query)
@@ -484,6 +480,7 @@ LIMIT 100
             self.client = None  # Force reconnect on next attempt
             raise
 
+
 class FilesystemCheckpoint:
     async def get_checkpoint(self) -> int | None:
         try:
@@ -496,28 +493,6 @@ class FilesystemCheckpoint:
         with open(CURSOR_FILENAME, "w") as f:
             f.write(str(cursor))
 
-class KeepermapDeletingCheckpoint:
-    def __init__(self):
-        self.clickhouse = ClickHouseManager()
-
-    async def get_checkpoint(self) -> int | None:
-        try:
-            client = await self.clickhouse.get_client()
-            result = await client.query("SELECT max(cursor) FROM cursor")
-            return int(result.first_row[0])
-        except (ClickHouseError, ValueError, TypeError) as e:
-            logger.error(f"Error reading checkpoint: {e}", exc_info=True)
-            return None
-
-    async def save_checkpoint(self, cursor: int) -> None:
-        try:
-            client = await self.clickhouse.get_client()
-            insert_query = f"INSERT INTO TABLE cursor VALUES ({cursor}, {cursor})"
-            delete_query = f"DELETE FROM cursor WHERE cursor < {cursor}"
-            await client.command(insert_query)
-            await client.command(delete_query)
-        except Exception as e:
-            logger.error(f"Error saving checkpoint: {e}", exc_info=True)
 
 class KeepermapUpdatingCheckpoint:
     def __init__(self):
@@ -526,7 +501,7 @@ class KeepermapUpdatingCheckpoint:
     async def get_checkpoint(self) -> int | None:
         try:
             client = await self.clickhouse.get_client()
-            result = await client.query("SELECT cursor FROM cursor")
+            result = await client.query("SELECT uint64_value FROM bluehoover_parameters WHERE key = 'cursor'")
             return int(result.first_row[0])
         except (ClickHouseError, ValueError, TypeError) as e:
             logger.error(f"Error reading checkpoint: {e}", exc_info=True)
@@ -537,12 +512,13 @@ class KeepermapUpdatingCheckpoint:
     async def save_checkpoint(self, cursor: int) -> None:
         try:
             client = await self.clickhouse.get_client()
-            insert_query = f"INSERT INTO TABLE cursor VALUES ('cursor', {cursor})"
-            update_query = f"ALTER TABLE cursor UPDATE cursor = {cursor} WHERE key = 'cursor'"
+            insert_query = f"INSERT INTO TABLE bluehoover_parameters VALUES ('cursor', {cursor})"
+            # update_query = f"ALTER TABLE bluehoover_parameters UPDATE uint64_value = {cursor} WHERE key = 'cursor'"
             await client.command(insert_query)
-            await client.command(update_query)
+            # await client.command(update_query)
         except Exception as e:
             logger.error(f"Error saving checkpoint: {e}", exc_info=True)
+
 
 if __name__ == "__main__":
     logger.info("Starting JetstreamHoover...")
@@ -551,7 +527,7 @@ if __name__ == "__main__":
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     hoover = JetstreamHoover()
-    logger.info("Hoovering!") 
+    logger.info("Hoovering!")
 
     try:
         loop.run_until_complete(hoover.start())

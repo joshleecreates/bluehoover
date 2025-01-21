@@ -38,7 +38,6 @@ services:
     image: clickhouse/clickhouse-keeper:latest
     ports:
       - "9181:9181"
-      - "9444:9444"
     volumes:
       - keeper_data:/var/lib/clickhouse-keeper
       - ./docker/keeper.d:/etc/clickhouse-keeper
