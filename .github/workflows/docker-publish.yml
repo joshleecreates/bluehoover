@@ -88,7 +88,9 @@ jobs:
           context: ${{ matrix.file_tag.context }}
           file: ${{ matrix.file_tag.file }}
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.file_tag.tag_suffix }}
+          tags: |
+                ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ matrix.file_tag.tag_suffix }}:${{ github.ref_name }}
+                ${{ github.ref_name == 'main' && format('{0}/{1}-{2}:latest', env.REGISTRY, env.IMAGE_NAME, matrix.file_tag.tag_suffix) || '' }}          
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
