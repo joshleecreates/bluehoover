@@ -33,6 +33,16 @@ jobs:
       # with sigstore/fulcio when running outside of PRs.
       id-token: write
 
+    strategy:
+      fail-fast: false
+      matrix:
+        file_tag:
+          - file: ./Dockerfile
+            tag_suffix: firehose
+            context: ./
+          - file: ./webapp.Dockerfile
+            tag_suffix: webapp
+            context: ./
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -75,13 +85,15 @@ jobs:
         id: build-and-push
         uses: docker/build-push-action@0565240e2d4ab88bba5387d719585280857ece09 # v5.0.0
         with:
-          context: .
+          context: ${{ matrix.file_tag.context }}
+          file: ${{ matrix.file_tag.file }}
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.file_tag.tag_suffix }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64,linux/arm64
+
 
 
       # Sign the resulting Docker image digest except on PRs.
