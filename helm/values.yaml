@@ -1,6 +1,6 @@
 global:
   clickhouse:
-    database: "default"
+    database: "bluehoover"
     user: "default"
     password: ""
     host: "clickhouse-bluehoover-clickhouse"
@@ -15,7 +15,7 @@ clickhouse:
     persistence:
       enabled: true
       size: 100Gi
-    replicasCount: 1
+    replicasCount: 3
     antiAffinity: false
     defaultUser:
       hostIP: "10.0.0.0/8"

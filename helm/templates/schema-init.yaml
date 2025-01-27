@@ -27,7 +27,7 @@ data:
     ENGINE = ReplicatedSummingMergeTree()
     ORDER BY (period, token);
 
-    CREATE MATERIALIZED VIEW IF NOT EXISTS bluehoover.tokenizer ON CLUSTER '{cluster}' TO tokens_by_interval 
+    CREATE MATERIALIZED VIEW IF NOT EXISTS bluehoover.tokenizer ON CLUSTER '{cluster}' TO bluehoover.tokens_by_interval 
     (
         `period` DateTime,
         `token` String,
@@ -37,7 +37,7 @@ data:
         toStartOfInterval(created_at, toIntervalMinute(10)) AS period,
         arrayJoin(splitByNonAlpha(lower(text))) AS token,
         1 AS count
-    FROM posts;
+    FROM bluehoover.posts;
 
     CREATE TABLE IF NOT EXISTS bluehoover.trends_1hr ON CLUSTER '{cluster}'
     (
@@ -50,8 +50,8 @@ data:
     ENGINE = ReplicatedMergeTree()
     ORDER BY (timestamp, token);
 
-    CREATE MATERIALIZED VIEW IF NOT EXISTS trends_1hr_mv ON CLUSTER '{cluster}'
-    REFRESH EVERY 1 HOUR APPEND TO trends_1hr
+    CREATE MATERIALIZED VIEW IF NOT EXISTS bluehoover.trends_1hr_mv ON CLUSTER '{cluster}'
+    REFRESH EVERY 1 HOUR APPEND TO bluehoover.trends_1hr
     (
         `timestamp` DateTime,
         `token` String,
@@ -72,7 +72,7 @@ data:
             toStartOfInterval(period, toIntervalHour(hours_in_period)) AS agg_period,
             token,
             sum(count) AS period_count
-        FROM tokens_by_interval
+        FROM bluehoover.tokens_by_interval
         FINAL
         WHERE agg_period = toStartOfInterval(now() - toIntervalHour(hours_in_period), toIntervalHour(hours_in_period))
         GROUP BY
@@ -84,7 +84,7 @@ data:
         SELECT
             token,
             sum(count) / hours_in_full_period AS avg_count
-        FROM tokens_by_interval
+        FROM bluehoover.tokens_by_interval
         FINAL
         WHERE period >= (now() - toIntervalHour(hours_in_full_period))
         GROUP BY token
@@ -93,5 +93,5 @@ data:
     ORDER BY `1hr_count` / `24hr_avg` DESC
     LIMIT 100;
 
-    CREATE TABLE IF NOT EXISTS bluehoover_parameters(`key` String, `uint64_value` UInt64 ) ON CLUSTER '{cluster}' ENGINE = KeeperMap('/keeper_map_tables') PRIMARY KEY key;
+    CREATE TABLE IF NOT EXISTS bluehoover.bluehoover_parameters ON CLUSTER '{cluster}' (`key` String, `uint64_value` UInt64 ) ENGINE = KeeperMap('/keeper_map_tables') PRIMARY KEY key;
 
