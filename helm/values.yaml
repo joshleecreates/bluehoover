@@ -1,0 +1,44 @@
+global:
+  clickhouse:
+    database: "default"
+    user: "default"
+    password: ""
+    host: "clickhouse-bluehoover-clickhouse"
+    port: "8123"
+
+clickhouse:
+  clickhouse: 
+    image: 
+      repository: clickhouse
+      image: clickhouse-server
+      tag: latest
+    persistence:
+      enabled: true
+      size: 100Gi
+    replicasCount: 1
+    antiAffinity: false
+    defaultUser:
+      hostIP: "10.0.0.0/8"
+
+  keeper:
+    enabled: true
+    replicaCount: 1
+  operator:
+    enabled: true
+
+  extra_config: |
+    <clickhouse>
+      <keeper_map_path_prefix>/keeper_map_tables</keeper_map_path_prefix>
+    </clickhouse>
+
+firehose:
+  image:
+    repository: ghcr.io/joshleecreates/bluehoover-firehose
+    tag: latest
+  debug: false
+
+webapp:
+  image:
+    repository: ghcr.io/joshleecreates/bluehoover-webapp
+    tag: latest
+  port: 8000

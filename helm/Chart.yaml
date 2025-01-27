@@ -1,0 +1,11 @@
+apiVersion: v2
+name: bluehoover
+description: A Helm chart for BlueHoover
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+
+dependencies:
+  - name: clickhouse
+    repository: file://../../altinity-helm-charts/charts/clickhouse
+    version: "*"

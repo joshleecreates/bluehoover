@@ -1,0 +1,6 @@
+dependencies:
+- name: clickhouse
+  repository: file://../../altinity-helm-charts/charts/clickhouse
+  version: 0.1.7
+digest: sha256:e991ba82b8d19ded35cd0b380823b7fa1e6b4d5c076bc310da63370b8a6bb41f
+generated: "2025-01-26T18:37:18.922315-05:00"

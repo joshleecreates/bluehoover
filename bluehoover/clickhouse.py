@@ -435,7 +435,7 @@ LIMIT 100
 """
 
             create_cursor_table_query = """
-                CREATE TABLE IF NOT EXISTS bluehoover_parameters(`key` String, `uint64_value` UInt64 ) ENGINE = KeeperMap('/keeper_map_tables') PRIMARY KEY key
+                CREATE TABLE IF NOT EXISTS bluehoover_parameters(`key` String, `uint64_value` UInt64 ) ENGINE = KeeperMap('/bluehoover_parameters') PRIMARY KEY key
             """
 
             await self.client.command(create_posts_table_query)

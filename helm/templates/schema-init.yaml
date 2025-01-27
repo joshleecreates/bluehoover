@@ -1,0 +1,97 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: clickhouse-init-scripts
+data:
+  init.sql: |
+    CREATE DATABASE IF NOT EXISTS bluehoover 
+    ON CLUSTER '{cluster}' 
+
+    CREATE TABLE IF NOT EXISTS bluehoover.posts ON CLUSTER '{cluster}' (
+        cid String,
+        uri String,
+        created_at DateTime64(3),
+        author String,
+        text String,
+        reply_parent_uri String,
+        insertion_time DateTime64(3) DEFAULT now64()
+    ) ENGINE = ReplicatedMergeTree()
+    ORDER BY (created_at, cid);
+
+    CREATE TABLE IF NOT EXISTS bluehoover.tokens_by_interval ON CLUSTER '{cluster}' 
+    (
+        `period` DateTime64(3),
+        `token` String,
+        `count` UInt64
+    )
+    ENGINE = ReplicatedSummingMergeTree()
+    ORDER BY (period, token);
+
+    CREATE MATERIALIZED VIEW IF NOT EXISTS bluehoover.tokenizer ON CLUSTER '{cluster}' TO tokens_by_interval 
+    (
+        `period` DateTime,
+        `token` String,
+        `count` UInt8
+    )
+    AS SELECT
+        toStartOfInterval(created_at, toIntervalMinute(10)) AS period,
+        arrayJoin(splitByNonAlpha(lower(text))) AS token,
+        1 AS count
+    FROM posts;
+
+    CREATE TABLE IF NOT EXISTS bluehoover.trends_1hr ON CLUSTER '{cluster}'
+    (
+        `refresh_time` DateTime64(3) DEFAULT now(),
+        `timestamp` DateTime64(3),
+        `token` String,
+        `1hr_count` UInt64,
+        `24hr_avg` Float32
+    )
+    ENGINE = ReplicatedMergeTree()
+    ORDER BY (timestamp, token);
+
+    CREATE MATERIALIZED VIEW IF NOT EXISTS trends_1hr_mv ON CLUSTER '{cluster}'
+    REFRESH EVERY 1 HOUR APPEND TO trends_1hr
+    (
+        `timestamp` DateTime,
+        `token` String,
+        `1hr_count` UInt64,
+        `24hr_avg` Float64
+    )
+    AS WITH
+        1 AS hours_in_period,
+        24 AS hours_in_full_period
+    SELECT
+        toStartOfInterval(now() - toIntervalHour(hours_in_period), toIntervalHour(hours_in_period)) AS timestamp,
+        token AS token,
+        this_period.period_count AS `1hr_count`,
+        full_period.avg_count AS `24hr_avg`
+    FROM
+    (
+        SELECT
+            toStartOfInterval(period, toIntervalHour(hours_in_period)) AS agg_period,
+            token,
+            sum(count) AS period_count
+        FROM tokens_by_interval
+        FINAL
+        WHERE agg_period = toStartOfInterval(now() - toIntervalHour(hours_in_period), toIntervalHour(hours_in_period))
+        GROUP BY
+            agg_period,
+            token
+        HAVING period_count >= 250
+    ) AS this_period,
+    (
+        SELECT
+            token,
+            sum(count) / hours_in_full_period AS avg_count
+        FROM tokens_by_interval
+        FINAL
+        WHERE period >= (now() - toIntervalHour(hours_in_full_period))
+        GROUP BY token
+    ) AS full_period
+    WHERE (this_period.token = full_period.token) AND (length(token) > 4) AND (full_period.avg_count > 10)
+    ORDER BY `1hr_count` / `24hr_avg` DESC
+    LIMIT 100;
+
+    CREATE TABLE IF NOT EXISTS bluehoover_parameters(`key` String, `uint64_value` UInt64 ) ON CLUSTER '{cluster}' ENGINE = KeeperMap('/keeper_map_tables') PRIMARY KEY key;
+
