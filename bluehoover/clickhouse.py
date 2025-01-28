@@ -281,6 +281,7 @@ class JetstreamHoover:
 
         await self.post_queue.put(record)
         time_us = message.get("time_us", 0)
+        await asyncio.sleep(0)
         if not self.cursor or (time_us > self.cursor + CURSOR_REFRESH_MS):
             logger.info(f"Writing checkpoint at {time_us}")
             await self.checkpoint.save_checkpoint(time_us)
