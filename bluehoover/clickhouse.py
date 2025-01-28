@@ -283,6 +283,7 @@ class JetstreamHoover:
 
         time_us = message.get("time_us", 0)
 
+        logger.debug(f"Checkpoint check - time_us: {time_us}, self.cursor: {self.cursor}, delta: {time_us - (self.cursor or 0)}, threshold: {CURSOR_REFRESH_MS}")
         if not self.cursor or (time_us > self.cursor + CURSOR_REFRESH_MS):
             logger.info(f"Writing checkpoint at {time_us}")
             await self.checkpoint.save_checkpoint(time_us)
