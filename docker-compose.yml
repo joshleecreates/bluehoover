@@ -18,10 +18,6 @@ services:
 
   firehose:
     image: ${IMAGE_NAME}-firehose:${APP_VERSION}
-    restart: unless-stopped
-
-  firehose:
-    image: ${IMAGE_NAME}:${APP_VERSION}-firehose
     build:
       context: .
       dockerfile: Dockerfile
