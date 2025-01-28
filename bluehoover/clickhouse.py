@@ -43,6 +43,7 @@ class JetstreamHoover:
             self.checkpoint = KeepermapDeletingCheckpoint()
         else:
             self.checkpoint = FilesystemCheckpoint()
+        self.checkpoint_lock = asyncio.Lock()  # Add lock for checkpoint operations
 
         signal.signal(
             signal.SIGINT, lambda _, __: asyncio.create_task(self.signal_handler())
@@ -282,10 +283,11 @@ class JetstreamHoover:
         await self.post_queue.put(record)
         time_us = message.get("time_us", 0)
         await asyncio.sleep(0)
-        if not self.cursor or (time_us > self.cursor + CURSOR_REFRESH_MS):
-            logger.info(f"Writing checkpoint at {time_us}")
-            await self.checkpoint.save_checkpoint(time_us)
-            self.cursor = time_us
+        async with self.checkpoint_lock:
+            if not self.cursor or (time_us > self.cursor + CURSOR_REFRESH_MS):
+                logger.info(f"Writing checkpoint at {time_us}")
+                await self.checkpoint.save_checkpoint(time_us)
+                self.cursor = time_us
 
     async def insert_batch(self, client: Client, batch: list[tuple]) -> None:
         """
