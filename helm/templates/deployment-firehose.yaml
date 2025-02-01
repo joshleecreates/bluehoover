@@ -15,6 +15,7 @@ spec:
       containers:
       - name: firehose
         image: "{{ .Values.firehose.image.repository }}:{{ .Values.firehose.image.tag }}"
+        imagePullPolicy: Always
         imagePullSecrets:
         - name: dockerconfigjson-github-com
         env:
